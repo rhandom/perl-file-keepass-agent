@@ -1,3 +1,4 @@
+bin/fkp-agent
 Changes
 lib/File/KeePass/Agent.pm
 lib/File/KeePass/Agent/linux.pm
