@@ -86,15 +86,16 @@ sub grab_global_keys {
             $mod |= 2 ** $x->num('KeyMask', $row->[1]);
         }
         my $seq = $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous');
-        $map{$seq} = $callback;
+        $map{$code}->{$mod} = $callback;
     }
 
     $x->event_handler('queue');
     while (1) {
         my %event = $x->next_event;
         next if ($event{'name'} || '') ne 'KeyRelease';
-        my $n = $event{'sequence_number'} || 0;
-        my $callback = $map{$n} || next;
+        my $code = $event{'detail'};
+        my $mod  = $event{'state'};
+        my $callback = $map{$code}->{$mod} || next;
         my $active_title = GetWindowName(GetInputFocus());
         $self->$callback($active_title, \%event);
     }
