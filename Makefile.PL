@@ -11,6 +11,7 @@ WriteMakefile(
               ABSTRACT_FROM => "lib/File/KeePass/Agent.pm",
               VERSION_FROM  => "lib/File/KeePass/Agent.pm",
               INSTALLDIRS   => 'site',
+              EXE_FILES     => [ 'bin/fkp-agent' ],
               PREREQ_PM     => {
                   'File::KeePass' => '0.01',
                   ((lc($^O) eq 'linux' || lc($^O) eq 'unix') ? (
