@@ -73,10 +73,7 @@ sub x { shift->{'x'} ||= X11::Protocol->new }
 
 sub grab_global_keys {
     my ($self, @callbacks) = @_;
-
     my $x = $self->x;
-
-    my $key = 'w';
 
     my %map;
     foreach my $c (@callbacks) {
