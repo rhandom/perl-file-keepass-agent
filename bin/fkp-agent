@@ -1,0 +1,4 @@
+#!/usr/bin/perl
+
+use File::KeePass::Agent;
+File::KeePass::Agent::run;
