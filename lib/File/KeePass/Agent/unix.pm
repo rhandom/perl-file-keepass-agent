@@ -10,7 +10,7 @@ use strict;
 use warnings;
 use Carp qw(croak);
 use Config::INI::Simple;
-use X11::GUITest qw(PressKey ReleaseKey PressReleaseKey SendKeys QuoteStringForSendKeys);
+use X11::GUITest qw(PressKey ReleaseKey PressReleaseKey SendKeys QuoteStringForSendKeys IsKeyPressed);
 use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
@@ -186,54 +186,21 @@ sub all_children {
 
 ###----------------------------------------------------------------###
 
-sub load_xtest {
-    my $self = shift;
-    my $x = $self->x;
-    return if $x->{'ext'}->{'XTEST'};
-    return if $x->{'ext'}->{'XTEST_FKP'};
-    $x->init_extension('XTEST'); # future proof - let X11::Protocol eventually add the extension
-    return if $x->{'ext'}->{'XTEST'};
-    if (! grep {$_ eq 'XTEST'} $x->ListExtensions) {
-        die "Cannot access the XTEST extension for sending key input - extension doesn't exist.\n";
-    }
-
-    # hack together a micro extension
-    my ($major, $event, $error) = $self->x('QueryExtension', 'XTEST');
-    my $ref = $x->{'ext_request'}->{$major} = [
-        ["XTestFakeKeyEvent", sub {
-            my $self = shift;
-            my ($key, $state, $send_delay) = @_;
-            return pack("CSL", $key, $state ? 1 : 0, $send_delay || 100);
-        }]];
-    $x->{'ext_request_num'}->{$ref->[$_]->[0]} = [$major, $_] for 0 .. $#$ref;
-    $x->{'ext'}->{'XTEST_FKP'} = [$major, $event, $error, undef];
-    use CGI::Ex::Dump qw(debug);
-}
-
 sub send_key_press {
     my ($self, $auto_type, $entry, $title, $event) = @_;
     warn "Auto-Type: $entry->{'title'}\n";
 
-    select(undef,undef,undef,.5);
+    # wait for all other keys to clear out before we begin to type
+    my $i = 0;
+    while (my @pressed = grep {IsKeyPressed($_)} qw(LSH RSH LCT RCT LAL RAL LMA RMA)) {
+        print "Waiting for @pressed\n" if ! (++$i % 100);
+        select(undef,undef,undef,.05)
+    }
+
     my $s = QuoteStringForSendKeys($auto_type);
     SendKeys($s);
 
     return;
-
-    $self->load_xtest;
-    my $key = $self->keycode('w');
-    my $x = $self->x;
-use CGI::Ex::Dump qw(debug);
-debug  'one';
-#    $x->XTestFakeKeyEvent($key, $x->num('Bool', 'True'), 0);
-#    $x->XTestFakeKeyEvent($key, $x->num('Bool', 'False'), 0);
-#    $x->flush;
-    debug 'three';
-#    retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, True, EventSendDelay);
-#    retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, False, EventSendDelay);
-#    XFlush(TheXDisplay);
-#    return(retval);
-
 }
 
 1;
