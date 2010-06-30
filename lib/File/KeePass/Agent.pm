@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-File::KeePass::Agent - Commandline interface interface to KeePass V1 database files
+File::KeePass::Agent - Application agent for working with File::KeePass files
 
 =cut
 
