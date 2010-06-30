@@ -12,10 +12,10 @@ WriteMakefile(
               VERSION_FROM  => "lib/File/KeePass/Agent.pm",
               INSTALLDIRS   => 'site',
               PREREQ_PM     => {
-                  'File::KeePass' => '0.1',
+                  'File::KeePass' => '0.01',
                   ((lc($^O) eq 'linux' || lc($^O) eq 'unix') ? (
-                       'X11::Protocol' => '0.1',
-                       'X11::GUITest'  => '0.1',
+                       'X11::Protocol' => '0.01',
+                       'X11::GUITest'  => '0.01',
                    ) : ()),
               },
               dist          => {
