@@ -69,7 +69,13 @@ sub read_config {
     return;
 }
 
-sub x { shift->{'x'} ||= X11::Protocol->new }
+sub x {
+    shift->{'x'} ||= do {
+        my $x = X11::Protocol->new;
+        $x->{'error_handler'} = sub { my ($x, $d) = @_; die $x->format_error_msg($d) };
+        $x;
+    };
+}
 
 sub grab_global_keys {
     my ($self, @callbacks) = @_;
@@ -101,13 +107,17 @@ sub grab_global_keys {
 
         my ($wid) = $x->GetInputFocus;
         my $orig  = $wid;
-        my $title = $self->wm_name($wid);
+        my $title = eval { $self->wm_name($wid) };
         while (!defined($title) || ! length($title)) {
             last if $wid == $x->root;
             my ($root, $parent) = $x->QueryTree($wid);
             last if $parent == $wid;
             $wid = $parent;
-            $title = $self->wm_name($wid);
+            $title = eval { $self->wm_name($wid) };
+        }
+        if (!defined($title) || !length($title)) {
+            warn "Couldn't find window title for window id $orig\n";
+            next;
         }
         $event{'_window_id'} = $wid;
         $event{'_window_id_orig'} = $orig;
@@ -154,7 +164,7 @@ sub property {
 sub properties {
     my ($self, $wid) = @_;
     my $x = $self->x;
-    return {map {$x->GetAtomName($_) => $self->property($wid, $_)} $x->ListProperties($wid) };
+    return {map {$x->atom_name($_) => $self->property($wid, $_)} $x->ListProperties($wid) };
 }
 
 sub wm_name {
@@ -171,6 +181,20 @@ sub all_children {
     my ($root, $parent, @children) = $self->x->QueryTree($wid);
     $self->all_children($_, $cache, $level + 1) for @children;
     return $cache;
+}
+
+###----------------------------------------------------------------###
+
+sub send_key_press {
+    my ($self, $auto_type, $entry, $title, $event) = @_;
+    warn "Auto-Type: $entry->{'title'}\n";
+
+
+#    retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, True, EventSendDelay);
+#    retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, False, EventSendDelay);
+#    XFlush(TheXDisplay);
+#    return(retval);
+
 }
 
 1;
