@@ -15,6 +15,7 @@ use warnings;
 use Carp qw(croak);
 use File::KeePass;
 
+our $VERSION = '0.01';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
@@ -42,10 +43,14 @@ sub run {
     my @callbacks;
     if (my $s = $self->read_config('global_shortcut')) {
         push @callbacks, [$s, 'search_auto_type'];
+        print "Listening on ".$self->shortcut_name($s)." for global shortcut\n";
     }
     foreach my $e ($self->active_entries) {
         next if ! $e->{'comment'} || $e->{'comment'} !~ /^Custom-Global-Shortcut:\s*(.+?)\s*$/m;
         my %info = map {lc($_) => 1} split /[\s+-]+/, $1;
+        my %at = $e->{'comment'} =~ m{ ^Auto-Type((?:-\d+)?): \s* (.+?) \s*$ }mxg;
+        next if ! scalar keys %at;
+        my $at = $at{""} || $at{(sort keys %at)[0]};
         my $s = {
             ctrl  => delete($info{'control'}) || delete($info{'cntrl'}) || delete($info{'ctrl'}),
             shift => delete($info{'shift'}) || delete($info{'shft'}),
@@ -56,11 +61,12 @@ sub run {
         if (@keys != 1) {
             croak "Cannot set global shortcut with more than one key (@keys) for entry \"$e->{'title'}\"\n";
         }
-        $s->{'key'} = $keys[0];
+        $s->{'key'} = lc $keys[0];
         push @callbacks, [$s, sub {
             my ($self, $title, $event) = @_;
-            return $self->do_auto_type($e, $title, $event);
+            return $self->do_auto_type($at, $e, $title, $event);
         }];
+        print "Listening on ".$self->shortcut_name($s)." for entry $e->{'title'}\n";
     }
     if (! @callbacks) {
         croak "No global_shortcut defined - hiding away for now";
@@ -70,11 +76,17 @@ sub run {
 
 sub keepass { shift->{'keepass'} ||= File::KeePass->new }
 
+sub shortcut_name {
+    my ($self, $s) = @_;
+    my $mod = join("-", map {ucfirst $_} grep {$s->{$_}} qw(ctrl shift alt win));
+    return $mod ? "$mod $s->{'key'}" : $s->{'key'};
+}
+
 sub active_entries { shift->keepass->find_entries({active => 1, 'group_title !' => 'Backup', 'title !' => 'Meta-Info'}) }
 
 sub active_searches {
     my $self = shift;
-    return $self->{'active_searches'} ||= do {
+    my $s = $self->{'active_searches'} ||= do {
         my @s;
         foreach my $e ($self->active_entries) {
             next if ! $e->{'comment'};
@@ -89,30 +101,71 @@ sub active_searches {
                 $t =~ s{^\\\*}{.*};
                 $t =~ s{\\\*$}{.*};
                 $t = qr{^$t$};
-                push @s, [$t, $at, $e];
+                push @s, {'qr' => $t, auto_type => $at, entry => $e};
             }
         }
         \@s;
     };
+    return @$s;
 }
 
 sub search_auto_type {
     my ($self, $title, $event) = @_;
-    print "Looking for match for $title\n";
     my @matches;
     foreach my $row ($self->active_searches) {
-        next if $title !~ $row->[0];
+        next if $title !~ $row->{'qr'};
         push @matches, $row;
     }
-    use CGI::Ex::Dump qw(debug);
-debug \@matches;
+    if (!@matches) {
+        $self->do_no_match($title);
+    }
+    elsif (@matches > 1) {
+        $self->do_auto_type_mult(\@matches, $title, $event);
+    }
+    else {
+        $self->do_auto_type($matches[0]->{'auto_type'}, $matches[0]->{'entry'}, $title, $event);
+    }
+}
 
+sub do_no_match {
+    my ($self, $title) = @_;
+    warn "No match for \"$title\"\n";
 }
 
 sub do_auto_type {
-    my ($self, $entry, $title, $event) = @_;
-    use CGI::Ex::Dump qw(debug);
-    debug $entry, $title, $event;
+    my ($self, $auto_type, $entry, $title, $event) = @_;
+
+    $auto_type =~ s{ \{ TAB      \} }{\t}xg;
+    $auto_type =~ s{ \{ ENTER    \} }{\n}xg;
+    $auto_type =~ s{ \{ PASSWORD \} }{
+        $self->keepass->locked_entry_password($entry);
+    }xeg;
+    $auto_type =~ s{ \{ (\w+)    \} }{
+        my $key = lc $1;
+        defined($entry->{$key}) ? $entry->{$key} : return $self->do_auto_type_unsupported($key);
+    }xeg;
+    return if ! length $auto_type;
+    $self->send_key_press($auto_type, $entry, $title, $event);
+}
+
+sub do_auto_type_mult {
+    my ($self, $matches, $title, $event) = @_;
+    warn "Found multiple matches - using the first\n";
+    $self->do_auto_type_mult($matches->[0]->{'auto_type'}, $matches->[0]->{'entry'}, $title, $event);
+}
+
+sub do_auto_type_unsupported {
+    my ($self, $key) = @_;
+    warn "Auto-type key \"$key\" is currently not supported.";
 }
 
 1;
+
+__END__
+
+=head1 SYNOPSIS
+
+   use File::KeePass::Agent;
+   File::KeePass::Agent::run();
+
+=cut
