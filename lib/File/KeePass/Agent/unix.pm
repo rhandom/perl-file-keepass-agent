@@ -11,7 +11,8 @@ use warnings;
 use Carp qw(croak);
 use Config::INI::Simple;
 use X11::Protocol;
-use X11::Keyboard;
+use vars qw(%keysyms);
+use X11::Keysyms qw(%keysyms); # part of X11::Protocol
 use IO::Prompt qw(prompt);
 
 sub prompt_for_file {
@@ -74,24 +75,21 @@ sub grab_global_keys {
     my ($self, @callbacks) = @_;
 
     my $x = $self->x;
-    my $k = X11::Keyboard->new($x);
+
+    my $key = 'w';
+
     my %map;
     foreach my $c (@callbacks) {
         my ($shortcut, $callback) = @$c;
 
-        my $k = X11::Keyboard->new($x);
-        my $code = $k->KeysymToKeycode($shortcut->{'key'});
+        my $code = $self->keycode($shortcut->{'key'});
         my $mod  = 0;
         foreach my $row ([ctrl => 'Control'], [shift => 'Shift'], [alt => 'Mod1'], [win => 'Mod4']) {
             next if ! $shortcut->{$row->[0]};
             $mod |= 2 ** $x->num('KeyMask', $row->[1]);
         }
         my $seq = eval { $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        if (! $seq) {
-            require Data::Dumper;
-            print Data::Dumper::Dumper($seq);
-            croak "The key binding is already in use";
-        }
+        croak "The key binding ".$self->shortcut_name($shortcut)." is already in use" if ! $seq;
         $map{$code}->{$mod} = $callback;
     }
 
@@ -122,6 +120,26 @@ sub grab_global_keys {
 
 #    $x->UngrabKey($code, $mod, $x->root);
 }
+
+###----------------------------------------------------------------###
+
+sub keymap {
+    my $self = shift;
+    return $self->{'keymap'} ||= do {
+        my $min = $self->x->{'min_keycode'};
+        my @map = $self->x->GetKeyboardMapping($min, $self->x->{'max_keycode'} - $min);
+        croak "Couldn't find the keyboard map" if ! @map;
+        my $m = {map { $map[$_][0] => $_ + $min } 0 .. $#map}; # return of the do
+    };
+}
+
+sub keycode {
+    my ($self, $key) = @_;
+    $key = $keysyms{$key} if $key !~ /^\d+$/;
+    return $self->keymap->{$key};
+}
+
+###----------------------------------------------------------------###
 
 sub attributes {
     my ($self, $wid) = @_;
