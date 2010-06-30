@@ -12,7 +12,6 @@ use Carp qw(croak);
 use Config::INI::Simple;
 use X11::Protocol;
 use X11::Keyboard;
-use X11::GUITest qw(GetWindowName GetInputFocus);
 use IO::Prompt qw(prompt);
 
 sub prompt_for_file {
@@ -69,10 +68,12 @@ sub read_config {
     return;
 }
 
+sub x { shift->{'x'} ||= X11::Protocol->new }
+
 sub grab_global_keys {
     my ($self, @callbacks) = @_;
 
-    my $x = X11::Protocol->new;
+    my $x = $self->x;
     my $k = X11::Keyboard->new($x);
     my %map;
     foreach my $c (@callbacks) {
@@ -85,22 +86,76 @@ sub grab_global_keys {
             next if ! $shortcut->{$row->[0]};
             $mod |= 2 ** $x->num('KeyMask', $row->[1]);
         }
-        my $seq = $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous');
+        my $seq = eval { $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous') };
+        if (! $seq) {
+            require Data::Dumper;
+            print Data::Dumper::Dumper($seq);
+            croak "The key binding is already in use";
+        }
         $map{$code}->{$mod} = $callback;
     }
 
     $x->event_handler('queue');
+    my $i;
     while (1) {
         my %event = $x->next_event;
         next if ($event{'name'} || '') ne 'KeyRelease';
         my $code = $event{'detail'};
         my $mod  = $event{'state'};
         my $callback = $map{$code}->{$mod} || next;
-        my $active_title = GetWindowName(GetInputFocus());
-        $self->$callback($active_title, \%event);
+
+        my ($wid) = $x->GetInputFocus;
+        my $orig  = $wid;
+        my $title = $self->wm_name($wid);
+        while (!defined($title) || ! length($title)) {
+            last if $wid == $x->root;
+            my ($root, $parent) = $x->QueryTree($wid);
+            last if $parent == $wid;
+            $wid = $parent;
+            $title = $self->wm_name($wid);
+        }
+        $event{'_window_id'} = $wid;
+        $event{'_window_id_orig'} = $orig;
+        $self->$callback($title, \%event);
+
     }
 
 #    $x->UngrabKey($code, $mod, $x->root);
+}
+
+sub attributes {
+    my ($self, $wid) = @_;
+    return {$self->x->GetWindowAttributes($wid)};
+}
+
+sub property {
+    my ($self, $wid, $prop) = @_;
+    return '' if !defined($wid) || $wid =~ /\D/;
+    $prop = $self->x->atom($prop) if $prop !~ /^\d+$/;
+    my ($val) = $self->x->GetProperty($wid, $prop, 'AnyPropertyType', 0, 255, 0);
+    return $val;
+}
+
+sub properties {
+    my ($self, $wid) = @_;
+    my $x = $self->x;
+    return {map {$x->GetAtomName($_) => $self->property($wid, $_)} $x->ListProperties($wid) };
+}
+
+sub wm_name {
+    my ($self, $wid) = @_;
+    return $self->property($wid, 'WM_NAME');
+}
+
+sub all_children {
+    my ($self, $wid, $cache, $level) = @_;
+    $cache ||= {};
+    $level ||= 0;
+    next if exists $cache->{$wid};
+    $cache->{$wid} = $level;
+    my ($root, $parent, @children) = $self->x->QueryTree($wid);
+    $self->all_children($_, $cache, $level + 1) for @children;
+    return $cache;
 }
 
 1;
