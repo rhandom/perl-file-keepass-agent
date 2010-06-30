@@ -12,8 +12,7 @@ use Carp qw(croak);
 use Config::INI::Simple;
 use X11::Protocol;
 use X11::Keyboard;
-use X11::GUITest qw(FindWindowLike GetWindowName IsWindowViewable GetRootWindow GetChildWindows GetWindowPos GetInputFocus);
-use CGI::Ex::Dump qw(debug);
+use X11::GUITest qw(GetWindowName GetInputFocus);
 use IO::Prompt qw(prompt);
 
 sub prompt_for_file {
@@ -70,28 +69,37 @@ sub read_config {
     return;
 }
 
-sub grab_global_key {
-    my ($self, $shortcut) = @_;
+sub grab_global_keys {
+    my ($self, @callbacks) = @_;
 
     my $x = X11::Protocol->new;
     my $k = X11::Keyboard->new($x);
-    my $code = $k->KeysymToKeycode($shortcut->{'key'});
-    my $mod  = 0;
-    foreach my $row ([ctrl => 'Control'], [shift => 'Shift'], [alt => 'Mod1'], [win => 'Mod4']) {
-        next if ! $shortcut->{$row->[0]};
-        $mod |= 2 ** $x->num('KeyMask', $row->[1]);
-    }
-    $x->event_handler('queue');
+    my %map;
+    foreach my $c (@callbacks) {
+        my ($shortcut, $callback) = @$c;
 
-    my $seq = $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous');
+        my $k = X11::Keyboard->new($x);
+        my $code = $k->KeysymToKeycode($shortcut->{'key'});
+        my $mod  = 0;
+        foreach my $row ([ctrl => 'Control'], [shift => 'Shift'], [alt => 'Mod1'], [win => 'Mod4']) {
+            next if ! $shortcut->{$row->[0]};
+            $mod |= 2 ** $x->num('KeyMask', $row->[1]);
+        }
+        my $seq = $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous');
+        $map{$seq} = $callback;
+    }
+
+    $x->event_handler('queue');
     while (1) {
         my %event = $x->next_event;
-        $event{'win'} = [map {GetWindowName($_)} grep {GetWindowName($_) && IsWindowViewable($_)} GetChildWindows($event{'child'})];
         next if ($event{'name'} || '') ne 'KeyRelease';
         my $n = $event{'sequence_number'} || 0;
-        $self->search_auto_type(GetWindowName(GetInputFocus()), \%event) if $n == $seq;
+        my $callback = $map{$n} || next;
+        my $active_title = GetWindowName(GetInputFocus());
+        $self->$callback($active_title, \%event);
     }
-    $x->UngrabKey($code, $mod, $x->root);
+
+#    $x->UngrabKey($code, $mod, $x->root);
 }
 
 1;
