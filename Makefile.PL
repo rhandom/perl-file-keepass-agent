@@ -17,6 +17,7 @@ WriteMakefile(
                   ((lc($^O) eq 'linux' || lc($^O) eq 'unix') ? (
                        'X11::Protocol' => '0.01',
                        'X11::GUITest'  => '0.01',
+                       'IO::Prompt'    => '0.01',
                    ) : ()),
               },
               dist          => {
