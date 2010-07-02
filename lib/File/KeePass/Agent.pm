@@ -145,6 +145,8 @@ sub do_auto_type {
         defined($entry->{$key}) ? $entry->{$key} : return $self->do_auto_type_unsupported($key);
     }xeg;
     return if ! length $auto_type;
+    return if $self->{'_last_send'} && time - $self->{'_last_send'} < 2;
+    $self->{'_last_send'} = time;
     $self->send_key_press($auto_type, $entry, $title, $event);
 }
 
