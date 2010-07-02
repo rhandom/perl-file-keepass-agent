@@ -181,6 +181,8 @@ for the file to open.
 
 You are then prompted for the password that will be used to open the file.
 
+See L<File::KeePass> for a listing of what KeyPass database features are currently handled.
+
 =head1 OS
 
 File::KeePass::Agent (FKPA) will try to load a module based on the OS returned by the $^O variable.
@@ -190,7 +192,7 @@ OS support during the initial releases is very sparse.
 
 The unix module variant contains documentation about what methods are necessary to support the FKPA api.
 
-See L<File::KeePass::Agent/FKPA METHODS>.
+See L<File::KeePass::Agent::unix/FKPA METHODS>.
 
 =head1 METHODS
 
