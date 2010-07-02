@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-fkp-agent - File::KeePass based agent
+fkp-agent - File::KeePass::Agent program
 
 =cut
 
@@ -17,6 +17,8 @@ You may pass the name of the keepass filename that you would like to open.  Othe
 for the file to open.
 
 You are then prompted for the password that will be used to open the file.
+
+See L<File::KeePass::Agent> for more information about what typical KeePass features are currently implemented.
 
 =head1 STATUS
 
