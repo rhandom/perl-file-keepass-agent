@@ -10,18 +10,19 @@ use strict;
 use warnings;
 use Test::More tests => 1;
 
-my @OS = qw(
-            linux
-            unix
-           );
+BEGIN {
+    my @OS = qw(
+                linux
+                unix
+               );
 
-my $os = lc $^O;
-if (! grep {$_ eq $os} @OS) {
-    SKIP: {
-        skip("OS $os - not supported at this time",1);
-    };
-    exit;
+    my $os = lc $^O;
+    if (! grep {$_ eq $os} @OS) {
+        SKIP: {
+            skip("OS $os - not supported at this time",1);
+        };
+        exit;
+    }
+
+    use_ok('File::KeePass::Agent');
 }
-
-
-use_ok('File::KeePass::Agent');
