@@ -198,6 +198,8 @@ sub send_key_press {
     }
 
     my $s = QuoteStringForSendKeys($auto_type);
+    $s =~ s/(?<!\{)\#/{#}/g; # take care of X11::GUITest missing one
+
     SendKeys($s);
 
     return;
