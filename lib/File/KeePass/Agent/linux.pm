@@ -18,6 +18,8 @@ __END__
 This module linux based support for the File::KeePassAgent.  It should
 not normally be used on its own.
 
+See L<File::KeePass::Agent::unix>.
+
 =head1 AUTHOR
 
 Paul Seamons <paul at seamons dot com>

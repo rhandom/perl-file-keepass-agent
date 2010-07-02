@@ -73,7 +73,7 @@ sub read_config {
 sub x {
     shift->{'x'} ||= do {
         my $x = X11::Protocol->new;
-        $x->{'error_handler'} = sub { my ($x, $d) = @_; use CGI::Ex::Dump qw(debug); debug $d, CGI::Ex::Dump::ctrace(); die $x->format_error_msg($d) };
+        $x->{'error_handler'} = sub { my ($x, $d) = @_; die $x->format_error_msg($d) };
         $x;
     };
 }
@@ -204,5 +204,107 @@ sub send_key_press {
 
     return;
 }
+
+=head1 DESCRIPTION
+
+This module provides unix based support for the File::KeePassAgent.  It should
+work for anything using an X server.  It should not normally be used on its own.
+
+=head1 FKPA METHODS
+
+The following methods must be provided by an FKPA OS variant.
+
+=over 4
+
+=item C<read_config>
+
+Takes the name of a key to read from the configuration file.  This method reads from
+$HOME/.config/keepassx/config.ini.
+
+=item C<prompt_for_file>
+
+Requests the name of a keepass database to open.
+
+=item C<prompt_for_pass>
+
+Requests for the password to open the choosen keepass database.
+It is passed the name of the file being opened.
+
+=item C<grab_global_keys>
+
+Takes a list of arrayrefs.  Each arrayref should
+contain a shortcut key description hashref and a callback.
+
+    $self->grab_global_keys([{ctrl => 1, shift => 1, alt => 1, key => "c"}, sub { print "Got here" }]);
+
+The callback will be called as a method of the Agent object.  It will
+be passed the current active window title and the generating event.
+
+   $self->$callback($window_title, \%event);
+
+This method use X11::Protocol to bind the shortcuts, then listens for the events to happen.
+
+=item C<send_key_press>
+
+Takes an auto-type string, the keepass entry that generated the request,
+the current active window title, and the generating event.
+
+This method uses X11::GUITest to "type" the chosen text to the X server.
+
+=back
+
+=head1 OTHER METHODS
+
+These methods are not directly used by the FKPA api.
+
+=over 4
+
+=item C<home_dir>
+
+Used by read_config to find the users home directory.
+
+=item C<x>
+
+Returns an X11::Protocol object
+
+=item C<keymap>
+
+Returns the keymap in use by the X server.
+
+=item C<keycode>
+
+Takes a key - returns the appropriate key code for use in grab_global_keys
+
+=item C<attributes>
+
+Takes an X window id - returns all of the attributes for the window.
+
+=item C<property>
+
+Takes an X window id and a property name.  Returns the current value of that property.
+
+=item C<properties>
+
+Takes an X window id - returns all of the properties for the window.
+
+=item C<wm_name>
+
+Takes an X window id - returns its window manager name.
+
+=item C<all_children>
+
+Returns all decended children of an X window.
+
+=back
+
+=head1 AUTHOR
+
+Paul Seamons <paul at seamons dot com>
+
+=head1 LICENSE
+
+This module may be distributed under the same terms as Perl itself.
+
+=cut
 
 1;

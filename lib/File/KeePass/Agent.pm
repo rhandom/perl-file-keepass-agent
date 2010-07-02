@@ -168,6 +168,153 @@ __END__
 =head1 SYNOPSIS
 
    use File::KeePass::Agent;
-   File::KeePass::Agent::run();
+   File::KeePass::Agent->new->run($file, $pass);
+
+   # OR
+   File::KeePass::Agent->new->run; # will read from @ARGV or prompt
+
+   # OR
+   File::KeePass::Agent::run(); # will read from @ARGV or prompt
+
+You may pass the name of the keepass filename that you would like to open.  Otherwise you are prompted
+for the file to open.
+
+You are then prompted for the password that will be used to open the file.
+
+=head1 OS
+
+File::KeePass::Agent (FKPA) will try to load a module based on the OS returned by the $^O variable.
+OS support during the initial releases is very sparse.
+
+=head1 FKPA OS API
+
+The unix module variant contains documentation about what methods are necessary to support the FKPA api.
+
+See L<File::KeePass::Agent/FKPA METHODS>.
+
+=head1 METHODS
+
+=over 4
+
+=item C<new>
+
+Returns an object blessed into the FKPA class.
+
+=item C<run>
+
+Reads the file, password, prints out a summary of the database, and binds any shortcut keys.
+Eventually, this will most likely support more maintenance features.
+
+=item C<keepass>
+
+Returns a File::KeePass object used for reading the database and keeping the entries looked in memory.
+
+=item C<shortcut_name>
+
+Returns a human readable name from a shortcut hashref.
+
+=item C<active_entries>
+
+Finds current active entries from the current database.
+
+=item C<active_searches>
+
+Parses the active searches and returns a listing of qr matches/auto-type string/entry records.
+
+=item C<search_auto_type>
+
+Takes an window title and compares it against the current active searches.
+
+=item C<do_no_match>
+
+Called if search_auto_type didn't find a matching window.
+
+=item C<do_auto_type>
+
+Called if search_auto_type found a single match.
+
+=item C<do_auto_type_mult>
+
+Called if search_auto_type found multiple matching windows.
+
+=item C<do_auto_type_unsupported>
+
+Called when FKPA doesn't support an auto-type directive.
+
+=back
+
+=head1 GLOBAL SHORTCUTS
+
+FKPA will read for the current global shortcut listed in the keepassx configuration file.  At
+the moment this must first be configured using keepassx itself.  Future support will allow for
+configuring this through FKPA itself.
+
+If this global shortcut is defined, when pressed it will call search_auto_type to find entries
+matching against the current window title.  If found, it will auto-type the matching entry.
+
+Additionally, custom global shortcuts may defined in the comments section of the FKP database
+entries.  They have the form:
+
+   Custom-Global-Shortcut:  Ctrl-Alt-Shift w
+
+This allows for individual entry auto-typing to be called directly.
+
+=head1 AUTOTYPE SUPPORT
+
+Comment sections of entries may contain Auto-type entries in the following form:
+
+    Auto-Type-Window: Admin Login*
+    Auto-Type-Window: Login*
+    Auto-Type: {USERNAME}{TAB}{PASSWORD}{ENTER}
+
+The Auto-Type-Window items are used to match against window titles.  You
+may put a leading * and/or a trailing * on the item to allow for wildcard
+matching.
+
+If a window matches an Auto-Type-Window entry the corresponding
+Auto-Type item will be processed and "auto-typed" to the current window.
+
+Currently the following auto-type directives are supported.
+
+=over 4
+
+=item C<USERNAME>
+
+The username for the entry.
+
+=item C<PASSWORD>
+
+The password for the entry.
+
+=item C<URL>
+
+The URL for the entry.
+
+=item C<...>
+
+All properties of the entry may be accessed.
+
+=item C<TAB>
+
+The tab character.
+
+=item C<ENTER>
+
+The enter character.
+
+=back
+
+=head1 STATUS
+
+This module and program are proof of concept.  They work, but are limited in their feature set.  There
+currently are no managment capabilities.
+
+=head1 AUTHOR
+
+Paul Seamons <paul at seamons dot com>
+
+=head1 LICENSE
+
+This module may be distributed under the same terms as Perl itself.
 
 =cut
