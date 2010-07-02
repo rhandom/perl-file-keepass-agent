@@ -1,4 +1,34 @@
 #!/usr/bin/perl
 
+=head1 NAME
+
+fkp-agent - File::KeePass based agent
+
+=cut
+
 use File::KeePass::Agent;
 File::KeePass::Agent::run;
+
+=head1 USAGE
+
+   fkp-agent [keepass-filename.kbd]
+
+You may pass the name of the keepass filename that you would like to open.  Otherwise you are prompted
+for the file to open.
+
+You are then prompted for the password that will be used to open the file.
+
+=head1 STATUS
+
+This module and program are proof of concept.  They work, but are limited in their feature set.  There
+currently are no managment capabilities.
+
+=head1 AUTHOR
+
+Paul Seamons <paul at seamons dot com>
+
+=head1 LICENSE
+
+This module may be distributed under the same terms as Perl itself.
+
+=cut
