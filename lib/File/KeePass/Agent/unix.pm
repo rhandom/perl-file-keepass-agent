@@ -9,7 +9,6 @@ File::KeePass::Agent::unix - platform specific utilities for Agent
 use strict;
 use warnings;
 use Carp qw(croak);
-use Config::INI::Simple;
 use X11::GUITest qw(PressKey ReleaseKey PressReleaseKey SendKeys QuoteStringForSendKeys IsKeyPressed);
 use X11::Protocol;
 use vars qw(%keysyms);
@@ -43,8 +42,22 @@ sub read_config {
     if (! $c) {
         my $home = $self->home_dir;
         my $file = "$home/.config/keepassx/config.ini";
-        $c = $self->{'config'} = Config::INI::Simple->new;
-        $c->read($file) if -e $file;
+        $c = $self->{'config'} = {};
+        if (open my $fh, '<', $file) { # ick - my own config.ini reader - too bad the main cpan entries are overbloat
+            my $block = '';
+            while (defined(my $line = <$fh>)) {
+                $line =~ s/^\s+//;
+                $line =~ s/\s+$//;
+		if ($line =~ /^ \[\s* (.*?) \s*\] $/x) {
+                    $block = $1;
+                    next;
+                } elsif (!length $line || $line =~ /^[;\#]/) {
+                    next;
+		}
+		my ($key, $val) = split /\s*=\s*/, $line, 2;
+                $c->{$block}->{$key} = $val;
+            }
+	}
     }
 
     if ($key eq 'last_file') {
