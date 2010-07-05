@@ -1,3 +1,7 @@
+0.02
+    2010-07-05
+        * Make sure Config::INI::Simple isn't needed
+
 0.01
     2010-07-02
         * First release
