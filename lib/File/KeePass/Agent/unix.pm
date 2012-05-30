@@ -21,12 +21,21 @@ sub prompt_for_file {
     if ($last_file && $last_file =~ m{ ^./..(/.+)$ }x) {
         $last_file = $self->home_dir . $1;
     }
-    return ''.prompt("Choose the kdb file to open: ", ($last_file ? (-d => $last_file) : ()));
+    my $file = ''.prompt("Choose the kdb file to open: ", ($last_file ? (-d => $last_file) : ()), -tty);
+    if ($last_file && $file && $last_file ne $file) {
+        if (prompt("Save $file as default kdb databsae?", -yn, -d => 'y', -tty)) {
+            my $home = $self->home_dir;
+            my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
+            $self->write_config(last_file => $copy);
+        }
+    }
+
+    return $file;
 }
 
 sub prompt_for_pass {
     my ($self, $file) = @_;
-    return ''.prompt("Enter your master key for $file: ", -e => '*');
+    return ''.prompt("Enter your master key for $file: ", -e => '*', -tty);
 }
 
 sub home_dir {
@@ -34,33 +43,18 @@ sub home_dir {
     return $home || croak "Couldn't find home dir for uid $<";
 }
 
+sub _config_file {
+    my $self = shift;
+    my $home = $self->home_dir;
+    return "$home/.config/keepassx/config.ini";
+}
+
 sub read_config {
     my ($self, $key) = @_;
-    croak "Missing read_config key" if ! $key;
-
-    my $c = $self->{'config'};
-    if (! $c) {
-        my $home = $self->home_dir;
-        my $file = "$home/.config/keepassx/config.ini";
-        $c = $self->{'config'} = {};
-        if (open my $fh, '<', $file) { # ick - my own config.ini reader - too bad the main cpan entries are overbloat
-            my $block = '';
-            while (defined(my $line = <$fh>)) {
-                $line =~ s/^\s+//;
-                $line =~ s/\s+$//;
-		if ($line =~ /^ \[\s* (.*?) \s*\] $/x) {
-                    $block = $1;
-                    next;
-                } elsif (!length $line || $line =~ /^[;\#]/) {
-                    next;
-		}
-		my ($key, $val) = split /\s*=\s*/, $line, 2;
-                $c->{$block}->{$key} = $val;
-            }
-	}
-    }
-
-    if ($key eq 'last_file') {
+    my $c = $self->{'config'} ||= $self->_ini_parse($self->_config_file);
+    if (! $key) {
+        return $c;
+    } elsif ($key eq 'last_file') {
         return $c->{'Options'}->{'LastFile'};
     }
     elsif ($key eq 'global_shortcut') {
@@ -78,9 +72,21 @@ sub read_config {
         };
         @{ $s }{qw(ctrl alt)} = (1, 1) if delete $s->{'altgr'};
         return $s;
+    } else {
+        die "Unknown key $key";
     }
+}
 
-    return;
+sub write_config {
+    my ($self, $key, $val) = @_;
+    my $c = $self->_ini_parse($self->_config_file, 1);
+    if ($key eq 'last_file') {
+        $c->{'Options'}->{'LastFile'} = $val;
+    } else {
+        return;
+    }
+    $self->_ini_write($c, $self->_config_file);
+    delete $self->{'config'};
 }
 
 sub x {
@@ -217,6 +223,50 @@ sub send_key_press {
 
     return;
 }
+
+###----------------------------------------------------------------###
+
+sub _ini_parse { # ick - my own config.ini reader - too bad the main cpan entries are overbloat
+    my ($self, $file, $order) = @_;
+    open my $fh, '<', $file or return {};
+    my $block = '';
+    my $c = {};
+    while (defined(my $line = <$fh>)) {
+        $line =~ s/^\s+//;
+        $line =~ s/\s+$//;
+        if ($line =~ /^ \[\s* (.*?) \s*\] $/x) {
+            $block = $1;
+            push @{ $c->{"\eorder\e"} }, $block if $order;
+            next;
+        } elsif (!length $line || $line =~ /^[;\#]/) {
+            push @{ $c->{$block}->{"\eorder\e"} }, \$line if $order;
+            next;
+        }
+        my ($key, $val) = split /\s*=\s*/, $line, 2;
+        $c->{$block}->{$key} = $val;
+        push @{ $c->{$block}->{"\eorder\e"} }, $key if $order;
+    }
+    return $c;
+}
+
+sub _ini_write {
+    my ($self, $c, $file) = @_;
+    open my $fh, "+<", $file or die "Could not open file $file for writing: $!";
+    for my $block (@{ $c->{"\eorder\e"} || [sort keys %$c] }) {
+        print $fh "[$block]\n";
+        my $ref = $c->{$block} || {};
+        for my $key (@{ $ref->{"\eorder\e"} || [sort keys %$ref] }) {
+            if (ref($key) eq 'SCALAR') {
+                print $fh $$key,"\n";
+            } else {
+                print $fh "$key=".(defined($ref->{$key}) ? $ref->{$key} : '')."\n";
+            }
+        }
+    }
+    truncate $fh, tell($fh);
+    close $fh;
+}
+
 
 =head1 DESCRIPTION
 
