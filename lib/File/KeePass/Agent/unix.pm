@@ -9,7 +9,6 @@ File::KeePass::Agent::unix - platform specific utilities for Agent
 use strict;
 use warnings;
 use Carp qw(croak);
-use X11::GUITest qw(SendKeys);
 use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
@@ -155,23 +154,38 @@ sub keymap {
     return $self->{'keymap'} ||= do {
         my $min = $self->x->{'min_keycode'};
         my @map = $self->x->GetKeyboardMapping($min, $self->x->{'max_keycode'} - $min);
-        croak "Couldn't find the keyboard map" if ! @map;
-        my $m = {map { $map[$_][0] => $_ + $min } 0 .. $#map}; # return of the do
+        my %map;
+        my $req_sh = $self->{'requires_shift'} = {};
+        my %rev = reverse %keysyms;
+        foreach my $m (@map) {
+            my $code = $min++;
+            foreach my $pair ([$m->[0], 0], (($m->[1] && $m->[1] != $m->[0]) ? ([$m->[1], 1]) : ())) {
+                my ($sym, $shift) = @$pair;
+                my $name = $rev{$sym};
+                if ($name && ! $map{$name}) {
+                    $map{$name} = $code;
+                    $req_sh->{$name} = 1 if $shift;
+                }
+                my $chr = ($sym < 0xFF00) ? chr($sym) : ($sym <= 0xFFFF) ? chr(0xFF & $sym) : next;
+                if (defined($name) && $chr ne $name && !$map{$chr}) {
+                    $map{$chr} = $code;
+                    $req_sh->{$chr} = 1 if $shift;
+                }
+            }
+        }
+        \%map;
     };
 }
 
-sub keysym {
-    my ($self, $key) = @_;
-    die "Missing key" if ! defined $key;
-    return $keysyms{$key} ||= do {
-        my $sym = ord $key;
-        ($sym < 32) ? $sym|0xFF00 : ($sym < 127) ? $sym : die "Cannot handle key $sym ($key)";
-    };
+sub requires_shift {
+    my $self = shift;
+    $self->keymap;
+    return $self->{'requires_shift'};
 }
 
 sub keycode {
     my ($self, $key) = @_;
-    return $self->keymap->{$self->keysym($key)};
+    return $self->keymap->{$key};
 }
 
 sub is_key_pressed {
@@ -182,6 +196,9 @@ sub is_key_pressed {
     my $byte = substr($keys, $code/8, 1);
     my $n    = ord $byte;
     my $on   = $n & (1 << ($code % 8));
+    if ($self->requires_shift->{$key} && @_ <= 3) {
+        return if ! $self->is_key_pressed('Shift_L', $keys, 'norecurse');
+    }
     return $on;
 }
 
@@ -241,32 +258,49 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-    my $s = $auto_type;
-    $s =~ s/(?<!\{)([\#^%+~(){}])/\{$1\}/g;
-
-    SendKeys($s);
-
+#    my ($wid) = $self->x->GetInputFocus;
+    my $keymap = $self->keymap;
+    my $shift  = $self->requires_shift;
+    for my $key (split //, $auto_type) {
+        my $code  = $keymap->{$key};
+        my $state = $shift->{$key} || 0;
+        if (! defined $code) {
+            warn "Couldn't find code for $key\n";
+            next;
+        }
+        $self->key_press($code, $state);
+        $self->key_release($code, $state);
+    }
     return;
 }
 
-sub send_keys {
-    my ($self, $str) = @_;
-    my @s = split //, $str;
-    my %rev = reverse %keysyms;
-    for (my $i = 0; $i < @s; $i++) {
-        my $k = $s[$i];
-        my $sym = $self->keysym($k);
-        my $rev = $rev{$sym};
-        print "($k) ($sym) ($rev)\n";
-    }
-}
-
 sub key_press {
-    my ($self, $k) = @_;
-    #$x->SendEvent($destination, $propagate, $event_mask, $event)
-    #retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, True, EventSendDelay);
+    my ($self, $code, $state) = @_;
+    my $x    = $self->x;
+    return $x->SendEvent('PointerWindow', 0, 0, $x->pack_event(
+        name   => "KeyPress",
+        detail => $code,
+        time   => 0,
+        root   => $x->root,
+        event  => $x->root,
+        state  => $state || 0,
+        same_screen => 1,
+    ));
 }
 
+sub key_release {
+    my ($self, $code, $state) = @_;
+    my $x    = $self->x;
+    return $x->SendEvent('PointerWindow', 0, 0, $x->pack_event(
+        name   => "KeyRelease",
+        detail => $code,
+        time   => 0,
+        root   => $x->root,
+        event  => $x->root,
+        state  => $state || 0,
+        same_screen => 1,
+    ));
+}
 
 ###----------------------------------------------------------------###
 
@@ -378,9 +412,24 @@ Returns an X11::Protocol object
 
 Returns the keymap in use by the X server.
 
+=item C<keysym>
+
+Returns the keysym id used by the X server.
+
 =item C<keycode>
 
 Takes a key - returns the appropriate key code for use in grab_global_keys
+
+=item C<is_key_pressed>
+
+Returns true if the key is currently pressed.  Most useful for items
+like Control_L, Shift_L, or Alt_L.
+
+=item C<are_keys_pressed>
+
+Takes an array of key names and returns which ones are currently
+pressed.  It has a little bit of caching as part of the process of
+calling is_key_pressed.  Returns any of the key names that are pressed.
 
 =item C<attributes>
 
