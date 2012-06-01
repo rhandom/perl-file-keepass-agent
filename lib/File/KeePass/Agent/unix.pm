@@ -9,7 +9,7 @@ File::KeePass::Agent::unix - platform specific utilities for Agent
 use strict;
 use warnings;
 use Carp qw(croak);
-use X11::GUITest qw(PressKey ReleaseKey PressReleaseKey SendKeys QuoteStringForSendKeys IsKeyPressed);
+use X11::GUITest qw(SendKeys);
 use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
@@ -160,10 +160,35 @@ sub keymap {
     };
 }
 
+sub keysym {
+    my ($self, $key) = @_;
+    die "Missing key" if ! defined $key;
+    return $keysyms{$key} ||= do {
+        my $sym = ord $key;
+        ($sym < 32) ? $sym|0xFF00 : ($sym < 127) ? $sym : die "Cannot handle key $sym ($key)";
+    };
+}
+
 sub keycode {
     my ($self, $key) = @_;
-    $key = $keysyms{$key} if $key !~ /^\d+$/;
-    return $self->keymap->{$key};
+    return $self->keymap->{$self->keysym($key)};
+}
+
+sub is_key_pressed {
+    my $self = shift;
+    my $key  = shift || return;
+    my $keys = shift || $self->x->QueryKeymap;
+    my $code = $self->keycode($key) || return;
+    my $byte = substr($keys, $code/8, 1);
+    my $n    = ord $byte;
+    my $on   = $n & (1 << ($code % 8));
+    return $on;
+}
+
+sub are_keys_pressed {
+    my $self = shift;
+    my $keys = $self->x->QueryKeymap;
+    return grep { $self->is_key_pressed($_, $keys) } @_;
 }
 
 ###----------------------------------------------------------------###
@@ -211,18 +236,37 @@ sub send_key_press {
 
     # wait for all other keys to clear out before we begin to type
     my $i = 0;
-    while (my @pressed = grep {IsKeyPressed($_)} qw(LSH RSH LCT RCT LAL RAL LMA RMA)) {
-        print "Waiting for @pressed\n" if ! (++$i % 100);
+    while (my @pressed = $self->are_keys_pressed(qw(Shift_L Shift_R Control_L Control_R Alt_L Alt_R Meta_L Meta_R Super_L Super_R Hyper_L Hyper_R Escape))) {
+        print "Waiting for @pressed\n" if 5 == (++$i % 40);
         select(undef,undef,undef,.05)
     }
 
-    my $s = QuoteStringForSendKeys($auto_type);
-    $s =~ s/(?<!\{)\#/{#}/g; # take care of X11::GUITest missing one
+    my $s = $auto_type;
+    $s =~ s/(?<!\{)([\#^%+~(){}])/\{$1\}/g;
 
     SendKeys($s);
 
     return;
 }
+
+sub send_keys {
+    my ($self, $str) = @_;
+    my @s = split //, $str;
+    my %rev = reverse %keysyms;
+    for (my $i = 0; $i < @s; $i++) {
+        my $k = $s[$i];
+        my $sym = $self->keysym($k);
+        my $rev = $rev{$sym};
+        print "($k) ($sym) ($rev)\n";
+    }
+}
+
+sub key_press {
+    my ($self, $k) = @_;
+    #$x->SendEvent($destination, $propagate, $event_mask, $event)
+    #retval = (BOOL)XTestFakeKeyEvent(TheXDisplay, kc, True, EventSendDelay);
+}
+
 
 ###----------------------------------------------------------------###
 
