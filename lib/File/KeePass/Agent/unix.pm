@@ -45,6 +45,7 @@ sub home_dir {
 sub _config_file {
     my $self = shift;
     my $home = $self->home_dir;
+    return "$home/.keepassx/config" if -e "$home/.keepassx/config";
     return "$home/.config/keepassx/config.ini";
 }
 
@@ -98,8 +99,16 @@ sub x {
 
 sub grab_global_keys {
     my ($self, @callbacks) = @_;
-    my $x = $self->x;
+    my $ShiftMask                = 1;
+    my $LockMask                 = 2;
+    my $ControlMask              = 4;
+    my $Mod1Mask                 = 8;
+    my $Mod2Mask                 = 16;
+    my $Mod3Mask                 = 32;
+    my $Mod4Mask                 = 64;
+    my $Mod5Mask                 = 128;
 
+    my $x = $self->x;
     my %map;
     foreach my $c (@callbacks) {
         my ($shortcut, $callback) = @$c;
@@ -112,7 +121,10 @@ sub grab_global_keys {
         }
         my $seq = eval { $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous') };
         croak "The key binding ".$self->shortcut_name($shortcut)." is already in use" if ! $seq;
-        $map{$code}->{$mod} = $callback;
+        $seq = eval { $x->GrabKey($code, $mod|$Mod2Mask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
+        #$seq = eval { $x->GrabKey($code, $mod|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
+        #$seq = eval { $x->GrabKey($code, $mod|$Mod2Mask|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
+        $map{$code}->{$mod} = $map{$code}->{$mod|$Mod2Mask} = $callback;
     }
 
     $x->event_handler('queue');
@@ -123,7 +135,6 @@ sub grab_global_keys {
         my $code = $event{'detail'};
         my $mod  = $event{'state'};
         my $callback = $map{$code}->{$mod} || next;
-
         my ($wid) = $x->GetInputFocus;
         my $orig  = $wid;
         my $title = eval { $self->wm_name($wid) };
@@ -258,7 +269,7 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-#    my ($wid) = $self->x->GetInputFocus;
+    my ($wid) = $self->x->GetInputFocus;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
     for my $key (split //, $auto_type) {
@@ -268,35 +279,38 @@ sub send_key_press {
             warn "Couldn't find code for $key\n";
             next;
         }
-        $self->key_press($code, $state);
-        $self->key_release($code, $state);
+        select undef, undef, undef, .1 if $key eq "\n";
+        $self->key_press($code, $state, $wid);
+        $self->key_release($code, $state, $wid);
     }
     return;
 }
 
 sub key_press {
-    my ($self, $code, $state) = @_;
+    my ($self, $code, $state, $wid) = @_;
     my $x    = $self->x;
-    return $x->SendEvent('PointerWindow', 0, 0, $x->pack_event(
+    ($wid) = $self->x->GetInputFocus if ! $wid;
+    return $x->SendEvent($wid, 0, 0, $x->pack_event(
         name   => "KeyPress",
         detail => $code,
         time   => 0,
         root   => $x->root,
-        event  => $x->root,
+        event  => $wid,
         state  => $state || 0,
         same_screen => 1,
     ));
 }
 
 sub key_release {
-    my ($self, $code, $state) = @_;
+    my ($self, $code, $state, $wid) = @_;
     my $x    = $self->x;
-    return $x->SendEvent('PointerWindow', 0, 0, $x->pack_event(
+    ($wid) = $self->x->GetInputFocus if ! $wid;
+    return $x->SendEvent($wid, 0, 0, $x->pack_event(
         name   => "KeyRelease",
         detail => $code,
         time   => 0,
         root   => $x->root,
-        event  => $x->root,
+        event  => $wid,
         state  => $state || 0,
         same_screen => 1,
     ));
