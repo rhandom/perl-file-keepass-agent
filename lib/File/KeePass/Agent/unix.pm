@@ -49,13 +49,19 @@ sub _config_file {
     return "$home/.config/keepassx/config.ini";
 }
 
+my %map = (
+    last_file => 'LastFile',
+    pre_gap   => 'AutoTypePreGap',
+    key_delay => 'AutoTypeKeyStrokeDelay',
+    );
+
 sub read_config {
     my ($self, $key) = @_;
     my $c = $self->{'config'} ||= $self->_ini_parse($self->_config_file);
     if (! $key) {
         return $c;
-    } elsif ($key eq 'last_file') {
-        return $c->{'Options'}->{'LastFile'};
+    } elsif (my $_key = $map{$key}) {
+        return $c->{'Options'}->{$_key};
     }
     elsif ($key eq 'global_shortcut') {
         return if ! defined(my $key = $c->{'Options'}->{'GlobalShortcutKey'});
@@ -80,8 +86,8 @@ sub read_config {
 sub write_config {
     my ($self, $key, $val) = @_;
     my $c = $self->_ini_parse($self->_config_file, 1);
-    if ($key eq 'last_file') {
-        $c->{'Options'}->{'LastFile'} = $val;
+    if (my $_key = $map{$key}) {
+        $c->{'Options'}->{$_key} = $val;
     } else {
         return;
     }
@@ -270,8 +276,11 @@ sub send_key_press {
     }
 
     my ($wid) = $self->x->GetInputFocus;
+    my $pre_gap = $self->read_config('pre_gap') * .001;
+    my $delay   = $self->read_config('key_delay') * .001;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
+    select undef, undef, undef, $pre_gap if $pre_gap;
     for my $key (split //, $auto_type) {
         my $code  = $keymap->{$key};
         my $state = $shift->{$key} || 0;
@@ -279,7 +288,7 @@ sub send_key_press {
             warn "Couldn't find code for $key\n";
             next;
         }
-        select undef, undef, undef, .1 if $key eq "\n";
+        select undef, undef, undef, $delay if $delay;
         $self->key_press($code, $state, $wid);
         $self->key_release($code, $state, $wid);
     }
