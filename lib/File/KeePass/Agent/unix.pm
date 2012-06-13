@@ -190,6 +190,7 @@ sub keymap {
                 }
             }
         }
+        $map{"\n"} = $map{"\r"}; # \n mapped to Linefeed - we want it to be Return
         \%map;
     };
 }
@@ -266,7 +267,9 @@ sub all_children {
 
 sub send_key_press {
     my ($self, $auto_type, $entry, $title, $event) = @_;
-    warn "Auto-Type: $entry->{'title'}\n";
+    warn "Auto-Type: $entry->{'title'}\n" if ref($entry);
+
+    my ($wid) = $self->x->GetInputFocus;
 
     # wait for all other keys to clear out before we begin to type
     my $i = 0;
@@ -275,13 +278,17 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-    my ($wid) = $self->x->GetInputFocus;
     my $pre_gap = $self->read_config('pre_gap') * .001;
     my $delay   = $self->read_config('key_delay') * .001;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
     select undef, undef, undef, $pre_gap if $pre_gap;
     for my $key (split //, $auto_type) {
+        my ($_wid) = $self->x->GetInputFocus; # send the key stroke
+        if ($_wid != $wid) {
+            warn "Window changed.  Aborted Auto-type.\n";
+            last;
+        }
         my $code  = $keymap->{$key};
         my $state = $shift->{$key} || 0;
         if (! defined $code) {
