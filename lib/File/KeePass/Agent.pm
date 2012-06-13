@@ -49,7 +49,8 @@ sub run {
             my $file = $ARGV[$i];
             next if $file =~ /^--?\w+$/;
             if ($ARGV[$i+1] && $ARGV[$i+1] =~ /^--?pass=(.+)/) {
-                push @pairs, [$file, $ARGV[1+$i++]];
+                push @pairs, [$file, $1];
+                $i++;
             } else {
                 push @pairs, [$file, undef];
             }
