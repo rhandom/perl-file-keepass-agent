@@ -191,6 +191,7 @@ sub keymap {
             }
         }
         $map{"\n"} = $map{"\r"}; # \n mapped to Linefeed - we want it to be Return
+        $req_sh->{"\n"} = $req_sh->{"\r"};
         \%map;
     };
 }
