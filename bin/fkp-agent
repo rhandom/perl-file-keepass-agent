@@ -11,19 +11,24 @@ File::KeePass::Agent::run;
 
 =head1 USAGE
 
-   fkp-agent [keepass-filename.kbd]
+   fkp-agent [keepass-filename.kbd [--pass=password]]
 
-You may pass the name of the keepass filename that you would like to open.  Otherwise you are prompted
-for the file to open.
+If no file is specified, you will be prompted for the file.  If no
+password is supplied you will be prompted for the password.  Multiple
+files can be passed.  Each can likewise have a corresponding --pass
+entry.
 
-You are then prompted for the password that will be used to open the file.
+You are then prompted for the password that will be used to open the
+file.
 
-See L<File::KeePass::Agent> for more information about what typical KeePass features are currently implemented.
+See L<File::KeePass::Agent> for more information about what typical
+KeePass features are currently implemented.
 
 =head1 STATUS
 
-This module and program are proof of concept.  They work, but are limited in their feature set.  There
-currently are no managment capabilities.
+This module and program are proof of concept.  They work, but are
+limited in their feature set.  There currently are no managment
+capabilities.
 
 =head1 AUTHOR
 
