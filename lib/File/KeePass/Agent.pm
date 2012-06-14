@@ -15,7 +15,7 @@ use warnings;
 use Carp qw(croak);
 use File::KeePass;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
