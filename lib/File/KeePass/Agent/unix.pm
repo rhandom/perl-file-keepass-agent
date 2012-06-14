@@ -319,8 +319,8 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-    my $pre_gap = $self->read_config('pre_gap') * .001;
-    my $delay   = $self->read_config('key_delay') * .001;
+    my $pre_gap = $self->read_config('pre_gap')   * .001 * 10;
+    my $delay   = $self->read_config('key_delay') * .001 * 10;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
     select undef, undef, undef, $pre_gap if $pre_gap;
