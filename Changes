@@ -1,3 +1,9 @@
+0.03
+    2012-06-13
+        * No more X11::GUITest dependency - use native X11::Protocol
+        * Allow for passing in multiple filenames
+        * Prepare for reading other keys
+
 0.02
     2010-07-05
         * Make sure Config::INI::Simple isn't needed
