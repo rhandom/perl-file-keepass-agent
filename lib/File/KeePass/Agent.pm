@@ -115,7 +115,7 @@ sub run {
             $s->{'key'} = lc $keys[0];
             push @callbacks, [$s, sub {
                 my ($self, $title, $event) = @_;
-                return $self->do_auto_type($at, $e, $title, $event);
+                return $self->do_auto_type({auto_type => $at, entry => $e, file => $file}, $title, $event);
             }];
             print "Listening on ".$self->shortcut_name($s)." for entry $e->{'title'}\n";
         }
