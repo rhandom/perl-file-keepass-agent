@@ -13,6 +13,10 @@ use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
 use IO::Prompt qw(prompt);
+#use Term::ReadKey qw(ReadMode GetControlChars);
+
+#my @end;
+#END { $_->() for @end };
 
 sub prompt_for_file {
     my $self = shift;
@@ -21,12 +25,14 @@ sub prompt_for_file {
         $last_file = $self->home_dir . $1;
     }
     my $file = ''.prompt("Choose the kdb file to open: ", ($last_file ? (-d => $last_file) : ()), -tty);
-    if ($last_file && $file && $last_file ne $file) {
-        if (prompt("Save $file as default kdb databsae?", -yn, -d => 'y', -tty)) {
-            my $home = $self->home_dir;
-            my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
-            $self->write_config(last_file => $copy);
-        }
+    if ($last_file
+        && $file
+        && $last_file ne $file
+        && -e $file
+        && prompt("Save $file as default kdb database?", -yn, -d => 'y', -tty)) {
+        my $home = $self->home_dir;
+        my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
+        $self->write_config(last_file => $copy);
     }
 
     return $file;
@@ -105,17 +111,17 @@ sub x {
 
 sub grab_global_keys {
     my ($self, @callbacks) = @_;
-    my $ShiftMask                = 1;
-    my $LockMask                 = 2;
-    my $ControlMask              = 4;
-    my $Mod1Mask                 = 8;
+    #my $ShiftMask                = 1;
+    #my $LockMask                 = 2;
+    #my $ControlMask              = 4;
+    #my $Mod1Mask                 = 8;
     my $Mod2Mask                 = 16;
-    my $Mod3Mask                 = 32;
-    my $Mod4Mask                 = 64;
-    my $Mod5Mask                 = 128;
+    #my $Mod3Mask                 = 32;
+    #my $Mod4Mask                 = 64;
+    #my $Mod5Mask                 = 128;
 
     my $x = $self->x;
-    my %map;
+    my %cb_map;
     foreach my $c (@callbacks) {
         my ($shortcut, $callback) = @$c;
 
@@ -130,38 +136,72 @@ sub grab_global_keys {
         $seq = eval { $x->GrabKey($code, $mod|$Mod2Mask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
         #$seq = eval { $x->GrabKey($code, $mod|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
         #$seq = eval { $x->GrabKey($code, $mod|$Mod2Mask|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        $map{$code}->{$mod} = $map{$code}->{$mod|$Mod2Mask} = $callback;
+        $cb_map{$code}->{$mod} = $cb_map{$code}->{$mod|$Mod2Mask} = $callback;
     }
 
     $x->event_handler('queue');
+
+    #my $in_fh = \*STDIN;
+    #local $SIG{'INT'} = sub { ReadMode 'restore', $in_fh; exit };
+    #push @end, sub { ReadMode 'restore', $in_fh };
+    #ReadMode 'noecho', $in_fh;
+    #ReadMode 'raw',    $in_fh;
+
+    #require IO::Select;
+    #my $x_fh  = $x->{'connection'}->fh;
+    #my $sel   = IO::Select->new($in_fh, $x_fh);
+
     my $i;
     while (1) {
-        my %event = $x->next_event;
-        next if ($event{'name'} || '') ne 'KeyRelease';
-        my $code = $event{'detail'};
-        my $mod  = $event{'state'};
-        my $callback = $map{$code}->{$mod} || next;
-        my ($wid) = $x->GetInputFocus;
-        my $orig  = $wid;
-        my $title = eval { $self->wm_name($wid) };
-        while (!defined($title) || ! length($title)) {
-            last if $wid == $x->root;
-            my ($root, $parent) = $x->QueryTree($wid);
-            last if $parent == $wid;
-            $wid = $parent;
-            $title = eval { $self->wm_name($wid) };
-        }
-        if (!defined($title) || !length($title)) {
-            warn "Couldn't find window title for window id $orig\n";
-            next;
-        }
-        $event{'_window_id'} = $wid;
-        $event{'_window_id_orig'} = $orig;
-        $self->$callback($title, \%event);
-
+        #for my $fh ($sel->can_read(0)) {
+         #   print "($fh $in_fh $x_fh)\n";
+            #if ($fh == $in_fh) {
+            #    $self->handle_term_input($fh);
+            #} else {
+                $self->read_x_event(\%cb_map);
+            #}
+        #}
     }
 
 #    $x->UngrabKey($code, $mod, $x->root);
+}
+
+#sub handle_term_input {
+#    my ($self, $fh) = @_;
+#
+#    my %cntl = GetControlChars $fh;
+#    do {
+#        my $chr = getc $fh;
+#        exit if $chr eq "\e" || $chr eq $cntl{'INTERRUPT'} || $chr eq $cntl{'EOF'};
+#        print ">>>$chr\n";
+#    } until ! IO::Select->new($fh)->can_read;
+#}
+
+sub read_x_event {
+    my ($self, $cb_map) = @_;
+    my $x = $self->x;
+    my %event = $x->next_event;
+    return if ($event{'name'} || '') ne 'KeyRelease';
+    my $code = $event{'detail'};
+    my $mod  = $event{'state'};
+    my $callback = $cb_map->{$code}->{$mod} || return;
+    my ($wid) = $x->GetInputFocus;
+    my $orig  = $wid;
+    my $title = eval { $self->wm_name($wid) };
+    while (!defined($title) || ! length($title)) {
+        last if $wid == $x->root;
+        my ($root, $parent) = $x->QueryTree($wid);
+        last if $parent == $wid;
+        $wid = $parent;
+        $title = eval { $self->wm_name($wid) };
+    }
+    if (!defined($title) || !length($title)) {
+        warn "Could not find window title for window id $orig\n";
+        return;
+    }
+    $event{'_window_id'} = $wid;
+    $event{'_window_id_orig'} = $orig;
+    $self->$callback($title, \%event);
 }
 
 ###----------------------------------------------------------------###
