@@ -13,10 +13,10 @@ use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
 use IO::Prompt qw(prompt);
-#use Term::ReadKey qw(ReadMode GetControlChars);
+use Term::ReadKey qw(ReadMode GetControlChars);
 
-#my @end;
-#END { $_->() for @end };
+my @end;
+END { $_->() for @end };
 
 sub prompt_for_file {
     my $self = shift;
@@ -137,45 +137,58 @@ sub grab_global_keys {
         #$seq = eval { $x->GrabKey($code, $mod|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
         #$seq = eval { $x->GrabKey($code, $mod|$Mod2Mask|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
         $cb_map{$code}->{$mod} = $cb_map{$code}->{$mod|$Mod2Mask} = $callback;
+
+        push @end, sub {
+            $x->UngrabKey($code, $mod|$Mod2Mask, $x->root);
+            $x->UngrabKey($code, $mod, $x->root);
+        };
     }
 
     $x->event_handler('queue');
 
-    #my $in_fh = \*STDIN;
-    #local $SIG{'INT'} = sub { ReadMode 'restore', $in_fh; exit };
-    #push @end, sub { ReadMode 'restore', $in_fh };
-    #ReadMode 'noecho', $in_fh;
-    #ReadMode 'raw',    $in_fh;
 
-    #require IO::Select;
-    #my $x_fh  = $x->{'connection'}->fh;
-    #my $sel   = IO::Select->new($in_fh, $x_fh);
+    # allow for only looking at grabbed keys
+    if ($self->no_menus) {
+        $self->read_x_event(\%cb_map) while 1;
+        exit;
+    }
+
+
+    # in addition to grabbed keys show an interactive menu of the options
+    my $in_fh = \*STDIN;
+    local $SIG{'INT'} = sub { ReadMode 'restore', $in_fh; exit };
+    push @end, sub { ReadMode 'restore', $in_fh };
+    ReadMode 'raw',    $in_fh;
+
+    require IO::Select;
+    my $x_fh = $x->{'connection'}->fh;
+    $x_fh->autoflush(1);
+    my $sel = IO::Select->new($x_fh, $in_fh);
 
     my $i;
     while (1) {
-        #for my $fh ($sel->can_read(0)) {
-         #   print "($fh $in_fh $x_fh)\n";
-            #if ($fh == $in_fh) {
-            #    $self->handle_term_input($fh);
-            #} else {
-                $self->read_x_event(\%cb_map);
-            #}
-        #}
+        my ($fh) = $sel->can_read(10);
+        next if ! $fh;
+        if ($fh == $in_fh) {
+            $self->_handle_term_input($fh) || last;
+        } else {
+            $self->read_x_event(\%cb_map);
+        }
     }
-
-#    $x->UngrabKey($code, $mod, $x->root);
 }
 
-#sub handle_term_input {
-#    my ($self, $fh) = @_;
-#
-#    my %cntl = GetControlChars $fh;
-#    do {
-#        my $chr = getc $fh;
-#        exit if $chr eq "\e" || $chr eq $cntl{'INTERRUPT'} || $chr eq $cntl{'EOF'};
-#        print ">>>$chr\n";
-#    } until ! IO::Select->new($fh)->can_read;
-#}
+sub no_menus { shift->{'no_menus'} }
+
+sub show_groups {
+    my $self = shift;
+    my $kdbs = $self->keepass;
+    return $self->_menu_groups if !$self->no_menus;
+    for my $pair (@$kdbs) {
+        my ($file, $kdb) = @$pair;
+        print "$file\n";
+        print $kdb->dump_groups({'group_title !' => 'Backup', 'title !' => 'Meta-Info'})
+    }
+}
 
 sub read_x_event {
     my ($self, $cb_map) = @_;
@@ -219,12 +232,13 @@ sub keymap {
             foreach my $pair ([$m->[0], 0], (($m->[1] && $m->[1] != $m->[0]) ? ([$m->[1], 1]) : ())) {
                 my ($sym, $shift) = @$pair;
                 my $name = $rev{$sym};
-                if ($name && ! $map{$name}) {
+                next if ! defined $name;
+                if (! $map{$name}) {
                     $map{$name} = $code;
                     $req_sh->{$name} = 1 if $shift;
                 }
                 my $chr = ($sym < 0xFF00) ? chr($sym) : ($sym <= 0xFFFF) ? chr(0xFF & $sym) : next;
-                if (defined($name) && $chr ne $name && !$map{$chr}) {
+                if ($chr ne $name && !$map{$chr}) {
                     $map{$chr} = $code;
                     $req_sh->{$chr} = 1 if $shift;
                 }
@@ -319,8 +333,8 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-    my $pre_gap = $self->read_config('pre_gap')   * .001 * 10;
-    my $delay   = $self->read_config('key_delay') * .001 * 10;
+    my $pre_gap = $self->read_config('pre_gap')   * .001;
+    my $delay   = $self->read_config('key_delay') * .001;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
     select undef, undef, undef, $pre_gap if $pre_gap;
@@ -333,7 +347,7 @@ sub send_key_press {
         my $code  = $keymap->{$key};
         my $state = $shift->{$key} || 0;
         if (! defined $code) {
-            warn "Couldn't find code for $key\n";
+            warn "Could not find code for $key\n";
             next;
         }
         select undef, undef, undef, $delay if $delay;
@@ -375,6 +389,208 @@ sub key_release {
 
 ###----------------------------------------------------------------###
 
+my $cntl;
+sub _handle_term_input {
+    my ($self, $fh) = @_;
+
+    $cntl ||= {GetControlChars $fh};
+    my $buf = '';
+    while (1) {
+        my @fh = IO::Select->new($fh)->can_read(0);
+        last if ! @fh;
+        my $chr = getc $fh;
+        exit if $chr eq $cntl->{'INTERRUPT'} || $chr eq $cntl->{'EOF'};
+        $buf .= $chr;
+    }
+    chomp $buf;
+    return 0 if $buf eq 'q' || $buf eq 'quit' || $buf eq 'exit';
+
+    my $cb    = $self->{'state_cb'} || {};
+    my $state = $self->{'state'} ||= [];
+    if (length($buf) && $cb->{$buf}) {
+        push @$state, $cb->{$buf};
+    } elsif (length($buf)) {
+        print "Unknown option ($buf)\n";
+    } else {
+        pop @$state;
+    }
+    while (1) {
+        my $s = pop(@$state) || ['_menu_groups'];
+        my ($method, @args) = @$s;
+        last if $self->$method(@args);
+    }
+
+    return 1;
+}
+
+my @a2z = ('a'..'z', 0..9, 'A'..'Z');
+sub _a2z {
+    my $i = shift;
+    return $a2z[$i];
+}
+
+sub _menu_groups {
+    my $self = shift;
+
+    my $i = 0;
+    my $cb = $self->{'state_cb'} = {};
+    foreach my $pair (@{ $self->keepass }) {
+        my ($file, $kdb) = @$pair;
+        print "  $file\n";
+        foreach my $g ($kdb->find_groups) {
+            my $indent = '    ' x $g->{'level'};
+            my $key = _a2z($i++);
+            $cb->{$key} = ['_menu_entries', $file, $g->{'id'}];
+            print "    ($key)    $indent".($g->{'expanded'} ? '-' : '+')."  $g->{'title'} ($g->{'id'}) $g->{'created'}\n";
+        }
+    }
+    return 1;
+}
+
+sub _menu_entries {
+    my ($self, $file, $gid) = @_;
+    my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
+    my $g = $kdb->find_group({id => $gid}) || do { print "\nNo such matching gid ($gid) in file ($file)\n\n"; return };
+    local $g->{'groups'}; # don't recurse while looking for entries since we are already flat
+    my @E = $kdb->find_entries({}, [$g]);
+    if (! @E) {
+        print "\nNo group entries in $g->{'title'}\n\n";
+        return;
+    }
+    print "  Group: $g->{'title'}\n";
+
+    my $i = 0;
+    my $cb = $self->{'state_cb'} = {};
+    for my $e (@E) {
+        my $key = _a2z($i++);
+        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}];
+        print "    ($key)    $e->{'title'}\t($e->{'id'}) $e->{'created'}\n";
+    }
+    return 1;
+}
+
+sub _menu_entry {
+    my ($self, $file, $eid, $action, $extra) = @_;
+    my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
+    my $e = $kdb->find_entry({id => $eid}) || do { print "\nNo such matching eid ($eid) in file ($file)\n\n"; return };
+
+    my $cb = $self->{'state_cb'} = {};
+    my $t = '';
+    $t .= "  Entry: $e->{'title'}\n";
+
+    my $i = 0;
+    my $key = _a2z($i++);
+    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'info'];
+    $t .= "    ($key)    Show entry information\n";
+
+    $key = _a2z($i++);
+    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'comment'];
+    $t .= "    ($key)    Show entry comment\n";
+
+    $key = _a2z($i++);
+    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'print_pass'];
+    $t .= "    ($key)    Print password\n";
+
+    $key = _a2z($i++);
+    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'auto_type'];
+    $t .= "    ($key)    Run Auto-Type in 5 seconds\n";
+
+    for (qw(password username url)) {
+        $key = _a2z($i++);
+        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'copy', $_];
+        $t .= "    ($key)    Copy $_ to clipboard\n";
+    }
+
+    if (!$action) {
+        print $t;
+    } elsif ($action eq 'info') {
+        foreach my $k (sort keys %$e) {
+            next if $k eq 'comment' || $k eq 'comment';
+            print "      $k: $e->{$k}\n";
+        }
+    } elsif ($action eq 'comment') {
+        print "-------------------\n";
+        if (! defined $e->{'comment'}) {
+            print "--No comment--\n";
+        } elsif (length $e->{'comment'}) {
+            print "--Empty comment--\n";
+        } else {
+            print $e->{'comment'};
+            print "\n--No newline--\n" if $e->{'comment'} !~ /\n$/;
+        }
+    } elsif ($action eq 'print_pass') {
+        my $pass = $kdb->locked_entry_password($e);
+        if (!defined $pass) {
+            print "--No password defined--\n";
+        } elsif (!length $pass) {
+            print "--Zero length password--\n";
+        } else {
+            print "$pass\n";
+        }
+    } elsif ($action eq 'auto_type') {
+        my @at = $e->{'comment'} =~ m{ ^Auto-Type(?:-\d+)?: \s* (.+?) \s*$ }mxg;
+        if (! @at) {
+            print "--No Auto-Type entry found in comment--\n";
+            return 1;
+        } elsif (@at > 1) {
+            print "--Multiple Auto-Type entries found in comment--\n";
+            return 1;
+        }
+
+        local $| = 1;
+        print "\n";
+        for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
+        my ($wid) = $self->x->GetInputFocus;
+        my $title = eval { $self->wm_name($wid) };
+
+        print "\rSending Auto-Type to window: $title            \n";
+
+        $self->do_auto_type({
+            auto_type => $at[0],
+            file => $file,
+            entry => $e,
+        }, $title, undef);
+    } elsif ($action eq 'copy') {
+        my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : $e->{$extra};
+        print "$data\n";
+        $data = '' if ! defined $data;
+        $self->_copy_to_clipboard($data) || return;
+        print "Sent $extra to clipboard\n";
+    } else {
+        print "--Unknown action $action--\n";
+    }
+    return 1;
+}
+
+sub _copy_to_clipboard {
+    my ($self, $data) = @_;
+
+    if (my $klip = eval {
+        require Net::DBus;
+        my $bus = Net::DBus->find;
+        my $obj = $bus->get_service("org.freedesktop.DBus")->get_object("/org/freedesktop/DBus");
+        my %h = map {$_ => 1} @{ $obj->ListNames };
+        die "No klipper service found" unless $h{'org.kde.klipper'};
+
+        return $bus->get_service('org.kde.klipper')->get_object('/klipper');
+    }) {
+        #my $i = $k->_introspector;
+        #debug [sort $i->list_interfaces("org.kde.klipper.klipper")];
+        #debug [sort $i->list_methods("org.kde.klipper.klipper")];
+        #debug [$i->get_method_params("org.kde.klipper.klipper", 'getClipboardContents')];
+        #debug [$i->get_method_returns("org.kde.klipper.klipper", 'getClipboardContents')];
+        $klip->setClipboardContents($data);
+        # TODO - set a timeout to clear the clipboard
+        return 1;
+    } else {
+        print "--No current clipboard service available\n";
+        return;
+        # TODO - fallback to xclip or Clipboard
+    }
+}
+
+###----------------------------------------------------------------###
+
 sub _ini_parse { # ick - my own config.ini reader - too bad the main cpan entries are overbloat
     my ($self, $file, $order) = @_;
     open my $fh, '<', $file or return {};
@@ -402,7 +618,7 @@ sub _ini_write {
     my ($self, $c, $file) = @_;
     open my $fh, "+<", $file or die "Could not open file $file for writing: $!";
     for my $block (@{ $c->{"\eorder\e"} || [sort keys %$c] }) {
-        print $fh "[$block]\n";
+        print $fh "[$block]\n" if length $block;
         my $ref = $c->{$block} || {};
         for my $key (@{ $ref->{"\eorder\e"} || [sort keys %$ref] }) {
             if (ref($key) eq 'SCALAR') {
