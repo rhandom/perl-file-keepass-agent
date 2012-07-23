@@ -48,7 +48,7 @@ sub run {
         for (my $i = 0; $i < @ARGV; $i++) {
             my $file = $ARGV[$i];
             next if $file =~ /^--?\w+$/;
-            if ($ARGV[$i+1] && $ARGV[$i+1] =~ /^--?pass=(.+)/) {
+            if ($ARGV[$i+1] && $ARGV[$i+1] =~ /^--?pass(?:word)?=(.+)/) {
                 push @pairs, [$file, $1];
                 $i++;
             } else {
@@ -84,14 +84,9 @@ sub run {
         }
     }
 
-    # show what is open
     my $kdbs = $self->keepass;
     die "No open databases.\n" if ! @$kdbs;
-    for my $pair (@$kdbs) {
-        my ($file, $kdb) = @$pair;
-        print "$file\n";
-        print $kdb->dump_groups({'group_title !' => 'Backup', 'title !' => 'Meta-Info'})
-    }
+    $self->show_groups;
 
     # figure out what to bind
     foreach my $row ($self->active_entries) {
