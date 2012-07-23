@@ -423,10 +423,10 @@ sub _handle_term_input {
     return 1;
 }
 
-my @a2z = ('a'..'z', 0..9, 'A'..'Z');
+my @a2z = ('a'..'z', 0..9);
 sub _a2z {
     my $i = shift;
-    return $a2z[$i];
+    return $a2z[$i % @a2z] x (1 + ($i / @a2z));
 }
 
 sub _menu_groups {
@@ -441,7 +441,7 @@ sub _menu_groups {
             my $indent = '    ' x $g->{'level'};
             my $key = _a2z($i++);
             $cb->{$key} = ['_menu_entries', $file, $g->{'id'}];
-            print "    ($key)    $indent".($g->{'expanded'} ? '-' : '+')."  $g->{'title'} ($g->{'id'}) $g->{'created'}\n";
+            print "    ($key)    $indent".($g->{'expanded'} ? '-' : '+')."  $g->{'title'}\n";
         }
     }
     return 1;
@@ -464,7 +464,7 @@ sub _menu_entries {
     for my $e (@E) {
         my $key = _a2z($i++);
         $cb->{$key} = ['_menu_entry', $file, $e->{'id'}];
-        print "    ($key)    $e->{'title'}\t($e->{'id'}) $e->{'created'}\n";
+        print "    ($key)    $e->{'title'}\n";
     }
     return 1;
 }
