@@ -552,7 +552,6 @@ sub _menu_entry {
         }, $title, undef);
     } elsif ($action eq 'copy') {
         my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : $e->{$extra};
-        print "$data\n";
         $data = '' if ! defined $data;
         $self->_copy_to_clipboard($data) || return;
         print "Sent $extra to clipboard\n";
