@@ -439,7 +439,8 @@ sub _handle_term_input {
     my ($text, $cb) = @$cur;
     if ($cb->{$buf}) {
         my ($method, @args) = @{ $cb->{$buf} };
-        push @$state, $self->$method(@args);
+        my $new = $self->$method(@args) || return;
+        push @$state, $new;
     } elsif ($buf eq '+') {
         print "\n";
         my $file = $self->prompt_for_file({no_save => 1});
@@ -598,25 +599,23 @@ sub _menu_entry {
         my @at = $e->{'comment'} =~ m{ ^Auto-Type(?:-\d+)?: \s* (.+?) \s*$ }mxg;
         if (! @at) {
             print "--No Auto-Type entry found in comment--\n";
-            return $cb;
         } elsif (@at > 1) {
             print "--Multiple Auto-Type entries found in comment--\n";
-            return $cb;
+        } else {
+            local $| = 1;
+            print "\n";
+            for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
+            my ($wid) = $self->x->GetInputFocus;
+            my $title = eval { $self->wm_name($wid) };
+
+            print "\rSending Auto-Type to window: $title            \n";
+
+            $self->do_auto_type({
+                auto_type => $at[0],
+                file => $file,
+                entry => $e,
+            }, $title, undef);
         }
-
-        local $| = 1;
-        print "\n";
-        for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
-        my ($wid) = $self->x->GetInputFocus;
-        my $title = eval { $self->wm_name($wid) };
-
-        print "\rSending Auto-Type to window: $title            \n";
-
-        $self->do_auto_type({
-            auto_type => $at[0],
-            file => $file,
-            entry => $e,
-        }, $title, undef);
     } elsif ($action eq 'copy') {
         my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : $e->{$extra};
         $data = '' if ! defined $data;
