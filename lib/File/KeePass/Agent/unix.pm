@@ -109,21 +109,52 @@ sub x {
     };
 }
 
-sub grab_global_keys {
-    my ($self, @callbacks) = @_;
-    #my $ShiftMask                = 1;
-    #my $LockMask                 = 2;
-    #my $ControlMask              = 4;
-    #my $Mod1Mask                 = 8;
-    my $Mod2Mask                 = 16;
-    #my $Mod3Mask                 = 32;
-    #my $Mod4Mask                 = 64;
-    #my $Mod5Mask                 = 128;
+###----------------------------------------------------------------###
 
+sub no_menus { shift->{'no_menus'} }
+
+sub main_loop {
+    my $self = shift;
+
+    my $kdbs = $self->keepass;
+    die "No open databases.\n" if ! @$kdbs;
+    my @callbacks = $self->active_callbacks;
+    if ($self->no_menus) {
+        for my $pair (@$kdbs) {
+            my ($file, $kdb) = @$pair;
+            print "$file\n";
+            print $kdb->dump_groups({'group_title !' => 'Backup', 'title !' => 'Meta-Info'})
+        }
+        die "No key callbacks defined and menus are disabled.  Exiting\n" if ! @callbacks;
+    }
+
+    $self->_bind_global_keys(@callbacks);
+    $self->_listen;
+}
+
+sub _unbind_global_keys {
+    my $self = shift;
     my $x = $self->x;
-    my %cb_map;
+    foreach my $pair (@{ delete($self->{'_bound_keys'}) || [] }) {
+        my ($code, $mod) = @$pair;
+        $x->UngrabKey($code, $mod, $x->root);
+    }
+}
+
+sub _bind_global_keys {
+    my ($self, @callbacks) = @_;
+    #my $ShiftMask    = 1;
+    #my $LockMask     = 2;
+    #my $ControlMask  = 4;
+    my $Mod2Mask     = 16; # 1 => 8, 2 => 16, 3 => 32, 4 => 64, 5 => 128
+
+    $self->_unbind_global_keys;
+    push @end, sub { $self->_unbind_global_keys };
+
+    my $cb_map = $self->{'global_cb_map'} = {};
+    my $x = $self->x;
     foreach my $c (@callbacks) {
-        my ($shortcut, $callback) = @$c;
+        my ($shortcut, $s_name, $callback) = @$c;
 
         my $code = $self->keycode($shortcut->{'key'});
         my $mod  = 0;
@@ -131,39 +162,50 @@ sub grab_global_keys {
             next if ! $shortcut->{$row->[0]};
             $mod |= 2 ** $x->num('KeyMask', $row->[1]);
         }
-        my $seq = eval { $x->GrabKey($code, $mod, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        croak "The key binding ".$self->shortcut_name($shortcut)." is already in use" if ! $seq;
-        $seq = eval { $x->GrabKey($code, $mod|$Mod2Mask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        #$seq = eval { $x->GrabKey($code, $mod|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        #$seq = eval { $x->GrabKey($code, $mod|$Mod2Mask|$LockMask, $x->root, 1, 'Asynchronous', 'Asynchronous') };
-        $cb_map{$code}->{$mod} = $cb_map{$code}->{$mod|$Mod2Mask} = $callback;
-
-        push @end, sub {
-            $x->UngrabKey($code, $mod|$Mod2Mask, $x->root);
-            $x->UngrabKey($code, $mod, $x->root);
-        };
+        foreach my $MOD (
+            $mod,
+            $mod|$Mod2Mask,
+            #$mod|$LockMask,
+            #$mod|$Mod2Mask|$LockMask,
+            ) {
+            my $seq = eval { $x->GrabKey($code, $MOD, $x->root, 1, 'Asynchronous', 'Asynchronous') };
+            croak "The key binding ".$self->shortcut_name($shortcut)." appears to already be in use" if ! $seq;
+            $cb_map->{$code}->{$MOD} = $callback;
+            push @{ $self->{'_bound_keys'} }, [$code, $MOD];
+        }
+        print "Listening to ".$self->shortcut_name($shortcut)." for $s_name\n";
     }
+}
 
+sub _listen {
+    my $self = shift;
+    my $x = $self->x;
     $x->event_handler('queue');
-
 
     # allow for only looking at grabbed keys
     if ($self->no_menus) {
-        $self->read_x_event(\%cb_map) while 1;
+        $self->read_x_event while 1;
         exit;
     }
 
 
     # in addition to grabbed keys show an interactive menu of the options
+    # listen to both the x protocol events as well as our local term
+    require IO::Select;
+
     my $in_fh = \*STDIN;
     local $SIG{'INT'} = sub { ReadMode 'restore', $in_fh; exit };
     push @end, sub { ReadMode 'restore', $in_fh };
     ReadMode 'raw',    $in_fh;
 
-    require IO::Select;
     my $x_fh = $x->{'connection'}->fh;
     $x_fh->autoflush(1);
+
     my $sel = IO::Select->new($x_fh, $in_fh);
+
+    # handle events as they occur
+    $self->{'state'} = [$self->_menu_groups]; # show the initial menu
+    print $self->{'state'}->[-1]->[0];
 
     my $i;
     while (1) {
@@ -172,26 +214,14 @@ sub grab_global_keys {
         if ($fh == $in_fh) {
             $self->_handle_term_input($fh) || last;
         } else {
-            $self->read_x_event(\%cb_map);
+            $self->read_x_event;
         }
     }
 }
 
-sub no_menus { shift->{'no_menus'} }
-
-sub show_groups {
-    my $self = shift;
-    my $kdbs = $self->keepass;
-    return $self->_menu_groups if !$self->no_menus;
-    for my $pair (@$kdbs) {
-        my ($file, $kdb) = @$pair;
-        print "$file\n";
-        print $kdb->dump_groups({'group_title !' => 'Backup', 'title !' => 'Meta-Info'})
-    }
-}
-
 sub read_x_event {
-    my ($self, $cb_map) = @_;
+    my $self = shift;
+    my $cb_map = shift || $self->{'global_cb_map'} || die "No global callbacks initialized\n";
     my $x = $self->x;
     my %event = $x->next_event;
     return if ($event{'name'} || '') ne 'KeyRelease';
@@ -405,19 +435,17 @@ sub _handle_term_input {
     chomp $buf;
     return 0 if $buf eq 'q' || $buf eq 'quit' || $buf eq 'exit';
 
-    my $cb    = $self->{'state_cb'} || {};
-    my $state = $self->{'state'} ||= [];
+    my $state = $self->{'state'} ||= [$self->_menu_groups];
+    my $cur   = $state->[-1];
+    my ($text, $cb) = @$cur;
     if (length($buf) && $cb->{$buf}) {
-        push @$state, $cb->{$buf};
-    } elsif (length($buf)) {
+        my ($method, @args) = @{ $cb->{$buf} };
+        push @$state, $self->$method(@args);
+    } elsif (length($buf) && $buf ne "\e") {
         print "Unknown option ($buf)\n";
     } else {
-        pop @$state;
-    }
-    while (1) {
-        my $s = pop(@$state) || ['_menu_groups'];
-        my ($method, @args) = @$s;
-        last if $self->$method(@args);
+        pop @$state if @$state > 1;
+        print $state->[-1]->[0];
     }
 
     return 1;
@@ -432,19 +460,20 @@ sub _a2z {
 sub _menu_groups {
     my $self = shift;
 
+    my $t = '';
     my $i = 0;
-    my $cb = $self->{'state_cb'} = {};
+    my $cb = {};
     foreach my $pair (@{ $self->keepass }) {
         my ($file, $kdb) = @$pair;
-        print "  $file\n";
+        $t .= "  File: $file\n";
         foreach my $g ($kdb->find_groups) {
             my $indent = '    ' x $g->{'level'};
             my $key = _a2z($i++);
             $cb->{$key} = ['_menu_entries', $file, $g->{'id'}];
-            print "    ($key)    $indent".($g->{'expanded'} ? '-' : '+')."  $g->{'title'}\n";
+            $t .= "    ($key)    $indent$g->{'title'}\n";
         }
     }
-    return 1;
+    return [$t, $cb];
 }
 
 sub _menu_entries {
@@ -457,16 +486,17 @@ sub _menu_entries {
         print "\nNo group entries in $g->{'title'}\n\n";
         return;
     }
-    print "  Group: $g->{'title'}\n";
+    my $t = "  Group: $g->{'title'}\n";
 
     my $i = 0;
-    my $cb = $self->{'state_cb'} = {};
+    my $cb = {};
     for my $e (@E) {
         my $key = _a2z($i++);
         $cb->{$key} = ['_menu_entry', $file, $e->{'id'}];
-        print "    ($key)    $e->{'title'}\n";
+        $t .= "    ($key)    $e->{'title'}\n";
     }
-    return 1;
+    print $t;
+    return [$t, $cb];
 }
 
 sub _menu_entry {
@@ -474,32 +504,24 @@ sub _menu_entry {
     my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
     my $e = $kdb->find_entry({id => $eid}) || do { print "\nNo such matching eid ($eid) in file ($file)\n\n"; return };
 
-    my $cb = $self->{'state_cb'} = {};
+    my $cb = {};
     my $t = '';
     $t .= "  Entry: $e->{'title'}\n";
 
-    my $i = 0;
-    my $key = _a2z($i++);
-    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'info'];
-    $t .= "    ($key)    Show entry information\n";
-
-    $key = _a2z($i++);
-    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'comment'];
-    $t .= "    ($key)    Show entry comment\n";
-
-    $key = _a2z($i++);
-    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'print_pass'];
-    $t .= "    ($key)    Print password\n";
-
-    $key = _a2z($i++);
-    $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'auto_type'];
-    $t .= "    ($key)    Run Auto-Type in 5 seconds\n";
-
-    for (qw(password username url)) {
-        $key = _a2z($i++);
-        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, 'copy', $_];
-        $t .= "    ($key)    Copy $_ to clipboard\n";
-    }
+    $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, 'info'];
+    $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, 'comment'];
+    $cb->{'P'} = ['_menu_entry', $file, $e->{'id'}, 'print_pass'];
+    $cb->{'a'} = ['_menu_entry', $file, $e->{'id'}, 'auto_type'];
+    $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'password'];
+    $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'username'];
+    $cb->{'U'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'url'];
+    $t .= "    (i)    Show entry information\n";
+    $t .= "    (c)    Show entry comment\n";
+    $t .= "    (P)    Print password\n";
+    $t .= "    (a)    Run Auto-Type in 5 seconds\n";
+    $t .= "    (p)    Copy password to clipboard\n";
+    $t .= "    (u)    Copy username to clipboard\n";
+    $t .= "    (U)    Copy url to clipboard\n";
 
     if (!$action) {
         print $t;
@@ -531,10 +553,10 @@ sub _menu_entry {
         my @at = $e->{'comment'} =~ m{ ^Auto-Type(?:-\d+)?: \s* (.+?) \s*$ }mxg;
         if (! @at) {
             print "--No Auto-Type entry found in comment--\n";
-            return 1;
+            return $cb;
         } elsif (@at > 1) {
             print "--Multiple Auto-Type entries found in comment--\n";
-            return 1;
+            return $cb;
         }
 
         local $| = 1;
@@ -558,7 +580,7 @@ sub _menu_entry {
     } else {
         print "--Unknown action $action--\n";
     }
-    return 1;
+    return [$t, $cb];
 }
 
 sub _copy_to_clipboard {
