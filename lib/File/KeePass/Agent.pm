@@ -99,6 +99,16 @@ sub keepass { shift->{'keepass'} ||= [] }
 
 sub keepass_class { 'File::KeePass' }
 
+sub unload_keepass {
+    my ($self, $file) = @_;
+    my $kdbs = $self->keepass;
+    for my $i (0 .. $#$kdbs) {
+        next if $kdbs->[$i]->[0] ne $file;
+        splice @$kdbs, $i, 1, ();
+        last;
+    }
+}
+
 ###----------------------------------------------------------------###
 
 sub active_callbacks {
