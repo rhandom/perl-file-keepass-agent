@@ -19,7 +19,7 @@ my @end;
 END { $_->() for @end };
 
 sub prompt_for_file {
-    my $self = shift;
+    my ($self, $args) = @_;
     my $last_file = $self->read_config('last_file');
     if ($last_file && $last_file =~ m{ ^./..(/.+)$ }x) {
         $last_file = $self->home_dir . $1;
@@ -29,7 +29,8 @@ sub prompt_for_file {
         && $file
         && $last_file ne $file
         && -e $file
-        && prompt("Save $file as default kdb database?", -yn, -d => 'y', -tty)) {
+        && !$args->{'no_save'}
+        && prompt("Save $file as default kdb database? ", -yn, -d => 'y', -tty)) {
         my $home = $self->home_dir;
         my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
         $self->write_config(last_file => $copy);
@@ -204,9 +205,7 @@ sub _listen {
     my $sel = IO::Select->new($x_fh, $in_fh);
 
     # handle events as they occur
-    $self->{'state'} = [$self->_menu_groups]; # show the initial menu
-    print $self->{'state'}->[-1]->[0];
-
+    $self->_init_state;
     my $i;
     while (1) {
         my ($fh) = $sel->can_read(10);
@@ -438,9 +437,41 @@ sub _handle_term_input {
     my $state = $self->{'state'} ||= [$self->_menu_groups];
     my $cur   = $state->[-1];
     my ($text, $cb) = @$cur;
-    if (length($buf) && $cb->{$buf}) {
+    if ($cb->{$buf}) {
         my ($method, @args) = @{ $cb->{$buf} };
         push @$state, $self->$method(@args);
+    } elsif ($buf eq '+') {
+        print "\n";
+        my $file = $self->prompt_for_file({no_save => 1});
+        if (!$file) {
+            print "No file specified.\n";
+            return;
+        } elsif (!-e $file) {
+            print "File \"$file\" does not exist.\n";
+            return;
+        }
+        my $pass;
+        my $k;
+        if (! defined $pass) {
+            while (!$k) {
+                $pass = $self->prompt_for_pass($file);
+                next if ! defined $pass;
+                last if ! length $pass;
+                $k = eval { $self->load_keepass($file, $pass) };
+                warn "Could not load database: $@" if ! $k;
+            }
+        }
+        $self->_init_state;
+    } elsif ($buf eq '-') {
+        print "\n  Close file\n";
+        my $i = 0;
+        my $cb = {};
+        for my $file (map {$_->[0]} @{ $self->keepass }) {
+            my $key = _a2z($i++);
+            $cb->{$key} = ['_close_file', $file];
+            print "    ($key)    $file\n";
+        }
+        splice @$state, 1, +@$state, ['', $cb];
     } elsif (length($buf) && $buf ne "\e") {
         print "Unknown option ($buf)\n";
     } else {
@@ -451,16 +482,29 @@ sub _handle_term_input {
     return 1;
 }
 
+sub _init_state {
+    my $self = shift;
+    $self->_bind_global_keys; # unbinds previous ones
+    my $state = $self->{'state'} = [$self->_menu_groups];
+    print $state->[-1]->[0];
+}
+
 my @a2z = ('a'..'z', 0..9);
 sub _a2z {
     my $i = shift;
     return $a2z[$i % @a2z] x (1 + ($i / @a2z));
 }
 
+sub _close_file {
+    my ($self, $file) = @_;
+    $self->unload_keepass($file);
+    $self->_init_state;
+}
+
 sub _menu_groups {
     my $self = shift;
 
-    my $t = '';
+    my $t = "\n";
     my $i = 0;
     my $cb = {};
     foreach my $pair (@{ $self->keepass }) {
@@ -486,7 +530,8 @@ sub _menu_entries {
         print "\nNo group entries in $g->{'title'}\n\n";
         return;
     }
-    my $t = "  Group: $g->{'title'}\n";
+    my $t = "\n  File: $file\n";
+    $t .= "  Group: $g->{'title'}\n";
 
     my $i = 0;
     my $cb = {};
@@ -505,7 +550,7 @@ sub _menu_entry {
     my $e = $kdb->find_entry({id => $eid}) || do { print "\nNo such matching eid ($eid) in file ($file)\n\n"; return };
 
     my $cb = {};
-    my $t = '';
+    my $t = "\n  File: $file\n";
     $t .= "  Entry: $e->{'title'}\n";
 
     $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, 'info'];
@@ -577,6 +622,7 @@ sub _menu_entry {
         $data = '' if ! defined $data;
         $self->_copy_to_clipboard($data) || return;
         print "Sent $extra to clipboard\n";
+        print "--Zero length $extra--\n" if ! length $data;
     } else {
         print "--Unknown action $action--\n";
     }
