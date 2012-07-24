@@ -18,6 +18,11 @@ use Term::ReadKey qw(ReadMode GetControlChars);
 my @end;
 END { $_->() for @end };
 
+sub init {
+    my $self = shift;
+    $self->{'no_menus'} = grep {$_ eq '--no_menus'} @ARGV;
+}
+
 sub prompt_for_file {
     my ($self, $args) = @_;
     my $last_file = $self->read_config('last_file');
@@ -205,7 +210,7 @@ sub _listen {
     my $sel = IO::Select->new($x_fh, $in_fh);
 
     # handle events as they occur
-    $self->_init_state;
+    $self->_init_state(1);
     my $i;
     while (1) {
         my ($fh) = $sel->can_read(10);
@@ -484,8 +489,8 @@ sub _handle_term_input {
 }
 
 sub _init_state {
-    my $self = shift;
-    $self->_bind_global_keys; # unbinds previous ones
+    my ($self, $first_time) = @_;
+    $self->_bind_global_keys($self->active_callbacks) if !$first_time; # unbinds previous ones
     my $state = $self->{'state'} = [$self->_menu_groups];
     print $state->[-1]->[0];
 }
