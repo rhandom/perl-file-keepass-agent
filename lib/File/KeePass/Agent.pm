@@ -84,11 +84,26 @@ sub run {
         }
     }
 
-    my $kdbs = $self->keepass;
-    die "No open databases.\n" if ! @$kdbs;
-    $self->show_groups;
+    $self->main_loop;
+}
 
-    # figure out what to bind
+sub load_keepass {
+    my ($self, $file, $pass) = @_;
+    my $kdb = $self->keepass_class->new;
+    $kdb->load_db($file, $pass);
+    push @{ $self->keepass }, [$file, $kdb];
+    return $kdb;
+}
+
+sub keepass { shift->{'keepass'} ||= [] }
+
+sub keepass_class { 'File::KeePass' }
+
+###----------------------------------------------------------------###
+
+sub active_callbacks {
+    my $self = shift;
+    my @callbacks;
     foreach my $row ($self->active_entries) {
         my ($file, $entries) = @$row;
         foreach my $e (@$entries) {
@@ -108,35 +123,17 @@ sub run {
                 croak "Cannot set global shortcut with more than one key (@keys) for entry \"$e->{'title'}\"\n";
             }
             $s->{'key'} = lc $keys[0];
-            push @callbacks, [$s, sub {
+            push @callbacks, [$s, "entry $e->{'title'}", sub {
                 my ($self, $title, $event) = @_;
                 return $self->do_auto_type({auto_type => $at, entry => $e, file => $file}, $title, $event);
             }];
-            print "Listening on ".$self->shortcut_name($s)." for entry $e->{'title'}\n";
         }
     }
     if (my $s = $self->read_config('global_shortcut')) {
-        push @callbacks, [$s, 'search_auto_type'];
-        print "Listening on ".$self->shortcut_name($s)." for global shortcut\n";
+        push @callbacks, [$s, 'global shortcut', 'search_auto_type'];
     }
-    if (! @callbacks) {
-        croak "No global_shortcut defined - hiding away for now";
-    }
-
-    $self->grab_global_keys(@callbacks);
+    return @callbacks;
 }
-
-sub load_keepass {
-    my ($self, $file, $pass) = @_;
-    my $kdb = $self->keepass_class->new;
-    $kdb->load_db($file, $pass);
-    push @{ $self->keepass }, [$file, $kdb];
-    return $kdb;
-}
-
-sub keepass { shift->{'keepass'} ||= [] }
-
-sub keepass_class { 'File::KeePass' }
 
 sub shortcut_name {
     my ($self, $s) = @_;
