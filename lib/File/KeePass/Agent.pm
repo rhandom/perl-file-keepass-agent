@@ -33,6 +33,8 @@ sub new {
 sub run {
     my $self = ref($_[0]) ? shift() : __PACKAGE__->new;
 
+    $self->init;
+
     # handle args coming in a multitude of ways
     my @pairs;
     if (@_) {
