@@ -206,6 +206,7 @@ sub _listen {
 
     my $x_fh = $x->{'connection'}->fh;
     $x_fh->autoflush(1);
+    STDOUT->autoflush(1);
 
     my $sel = IO::Select->new($x_fh, $in_fh);
 
@@ -428,33 +429,41 @@ sub _handle_term_input {
     my ($self, $fh) = @_;
 
     $cntl ||= {GetControlChars $fh};
-    my $buf = '';
+    $self->{'buffer'} = '' if ! defined $self->{'buffer'};
+    my $buf = delete $self->{'buffer'};
     while (1) {
         my @fh = IO::Select->new($fh)->can_read(0);
         last if ! @fh;
         my $chr = getc $fh;
         exit if $chr eq $cntl->{'INTERRUPT'} || $chr eq $cntl->{'EOF'};
         $buf .= $chr;
+        last if $chr eq "\n";
     }
-    chomp $buf;
+    my $had_nl = chomp $buf;
     return 0 if $buf eq 'q' || $buf eq 'quit' || $buf eq 'exit';
+    print "\r$buf" if length $buf > 1;
 
     my $state = $self->{'state'} ||= [$self->_menu_groups];
     my $cur   = $state->[-1];
     my ($text, $cb) = @$cur;
-    if ($cb->{$buf}) {
+    my $matches = grep {$_ =~ /^\Q$buf\E/} keys %$cb;
+    if (!$had_nl && $matches > 1) {
+        $self->{'buffer'} = $buf;
+        print "\r$buf" if length($buf) eq 1;# \r";
+    } elsif ($cb->{$buf}) {
+        print "\n" if !$had_nl;
         my ($method, @args) = @{ $cb->{$buf} };
-        my $new = $self->$method(@args) || return;
+        my $new = $self->$method(@args) or return 1;
         push @$state, $new;
     } elsif ($buf eq '+') {
         print "\n";
         my $file = $self->prompt_for_file({no_save => 1});
         if (!$file) {
             print "No file specified.\n";
-            return;
+            return 1;
         } elsif (!-e $file) {
             print "File \"$file\" does not exist.\n";
-            return;
+            return 1;
         }
         my $pass;
         my $k;
@@ -463,8 +472,7 @@ sub _handle_term_input {
                 $pass = $self->prompt_for_pass($file);
                 next if ! defined $pass;
                 last if ! length $pass;
-                $k = eval { $self->load_keepass($file, $pass) };
-                warn "Could not load database: $@" if ! $k;
+                $k = eval { $self->load_keepass($file, $pass) } or warn "Could not load database: $@";
             }
         }
         $self->_init_state;
@@ -479,6 +487,7 @@ sub _handle_term_input {
         }
         splice @$state, 1, +@$state, ['', $cb];
     } elsif (length($buf) && $buf ne "\e") {
+        print "\n" if !$had_nl;
         print "Unknown option ($buf)\n";
     } else {
         pop @$state if @$state > 1;
@@ -603,24 +612,24 @@ sub _menu_entry {
     } elsif ($action eq 'auto_type') {
         my @at = $e->{'comment'} =~ m{ ^Auto-Type(?:-\d+)?: \s* (.+?) \s*$ }mxg;
         if (! @at) {
-            print "--No Auto-Type entry found in comment--\n";
+            print "--No Auto-Type entry found in comment (defaulting to {PASSWORD}{ENTER})--\n";
+            $at[0] = "{PASSWORD}{ENTER}";
         } elsif (@at > 1) {
-            print "--Multiple Auto-Type entries found in comment--\n";
-        } else {
-            local $| = 1;
-            print "\n";
-            for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
-            my ($wid) = $self->x->GetInputFocus;
-            my $title = eval { $self->wm_name($wid) };
-
-            print "\rSending Auto-Type to window: $title            \n";
-
-            $self->do_auto_type({
-                auto_type => $at[0],
-                file => $file,
-                entry => $e,
-            }, $title, undef);
+            print "--Multiple Auto-Type entries found in comment - using the first one--\n";
         }
+        local $| = 1;
+        print "\n";
+        for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
+        my ($wid) = $self->x->GetInputFocus;
+        my $title = eval { $self->wm_name($wid) };
+
+        print "\rSending Auto-Type to window: $title            \n";
+
+        $self->do_auto_type({
+            auto_type => $at[0],
+            file => $file,
+            entry => $e,
+        }, $title, undef);
     } elsif ($action eq 'copy') {
         my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : $e->{$extra};
         $data = '' if ! defined $data;
