@@ -13,9 +13,9 @@ package File::KeePass::Agent;
 use strict;
 use warnings;
 use Carp qw(croak);
-use File::KeePass;
+use File::KeePass '2.00';
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
@@ -121,9 +121,7 @@ sub active_callbacks {
         foreach my $e (@$entries) {
             next if ! $e->{'comment'} || $e->{'comment'} !~ /^Custom-Global-Shortcut:\s*(.+?)\s*$/m;
             my %info = map {lc($_) => 1} split /[\s+-]+/, $1;
-            my %at = $e->{'comment'} =~ m{ ^Auto-Type((?:-\d+)?): \s* (.+?) \s*$ }mxg;
-            next if ! scalar keys %at;
-            my $at = $at{""} || $at{(sort keys %at)[0]};
+            my $at = (($e->{'auto_type'} || [])->[0] || {})->{'keys'} || '{PASSWORD}{ENTER}';
             my $s = {
                 ctrl  => delete($info{'control'}) || delete($info{'cntrl'}) || delete($info{'ctrl'}),
                 shift => delete($info{'shift'}) || delete($info{'shft'}),
@@ -171,19 +169,20 @@ sub active_searches {
         foreach my $row ($self->active_entries) {
             my ($file, $entries) = @$row;
             foreach my $e (@$entries) {
-                next if ! $e->{'comment'};
-                my %at = $e->{'comment'} =~ m{ ^Auto-Type((?:-\d+)?): \s* (.+?) \s*$ }mxg;
-                next if ! scalar keys %at;
-                my @w  = $e->{'comment'} =~ m{ ^Auto-Type-Window((?:-\d+)?): \s* (.+?) \s*$ }mxg;
-                while (@w) {
-                    my $n = shift @w;
-                    my $t = shift @w;
-                    my $at = defined($at{$n}) ? $at{$n}: defined($at{""}) ? $at{""} : next;
-                    $t = quotemeta($t);
-                    $t =~ s{^\\\*}{.*};
-                    $t =~ s{\\\*$}{.*};
-                    $t = qr{^$t$};
-                    push @s, {'qr' => $t, auto_type => $at, file => $file, entry => $e};
+                foreach my $at ($e->{'auto_type'} || []) {
+                    my ($win, $keys) = @$at{qw(window keys)};
+                    next if ! defined($win) || ! length($win);
+                    if (! defined($keys) || ! length($keys)) {
+                        my $kdb = (map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass })[0];
+                        my ($e2, $group) = $kdb->find_entry($e);
+                        $keys = $group->{'auto_type_default'};
+                        next if ! defined($keys) || ! length($keys);
+                    }
+                    $win = quotemeta($win);
+                    $win =~ s{^\\\*}{.*};
+                    $win =~ s{\\\*$}{.*};
+                    $win = qr{^$win$};
+                    push @s, {'qr' => $win, auto_type => $keys, file => $file, entry => $e};
                 }
             }
         }
@@ -269,21 +268,25 @@ __END__
    File::KeePass::Agent::run(\@files, \@passes);  # parallel arrays
 
 
-You may pass the name of the keepass filename that you would like to open.  Otherwise you are prompted
-for the file to open.
+You may pass the name of the keepass filename that you would like to
+open.  Otherwise you are prompted for the file to open.
 
-You are then prompted for the password that will be used to open the file.
+You are then prompted for the password that will be used to open the
+file.
 
-See L<File::KeePass> for a listing of what KeyPass database features are currently handled.
+See L<File::KeePass> for a listing of what KeyPass database features
+are currently handled.
 
 =head1 OS
 
-File::KeePass::Agent (FKPA) will try to load a module based on the OS returned by the $^O variable.
-OS support during the initial releases is very sparse.
+File::KeePass::Agent (FKPA) will try to load a module based on the OS
+returned by the $^O variable.  OS support during the initial releases
+is very sparse.
 
 =head1 FKPA OS API
 
-The unix module variant contains documentation about what methods are necessary to support the FKPA api.
+The unix module variant contains documentation about what methods are
+necessary to support the FKPA api.
 
 See L<File::KeePass::Agent::unix/FKPA METHODS>.
 
@@ -297,12 +300,14 @@ Returns an object blessed into the FKPA class.
 
 =item C<run>
 
-Reads the file, password, prints out a summary of the database, and binds any shortcut keys.
-Eventually, this will most likely support more maintenance features.
+Reads the file, password, prints out a summary of the database, and
+binds any shortcut keys.  Eventually, this will most likely support
+more maintenance features.
 
 =item C<keepass>
 
-Returns an arrayref of arrayrefs continaing file and File::KeePass object pairs.
+Returns an arrayref of arrayrefs continaing file and File::KeePass
+object pairs.
 
 =item C<shortcut_name>
 
@@ -314,7 +319,8 @@ Finds current active entries from any of the open databases.
 
 =item C<active_searches>
 
-Parses the active searches and returns a listing of qr matches/auto-type string/entry records.
+Parses the active searches and returns a listing of qr
+matches/auto-type string/entry records.
 
 =item C<search_auto_type>
 
@@ -340,23 +346,27 @@ Called when FKPA doesn't support an auto-type directive.
 
 =head1 GLOBAL SHORTCUTS
 
-FKPA will read for the current global shortcut listed in the keepassx configuration file.  At
-the moment this must first be configured using keepassx itself.  Future support will allow for
-configuring this through FKPA itself.
+FKPA will read for the current global shortcut listed in the keepassx
+configuration file.  At the moment this must first be configured using
+keepassx itself.  Future support will allow for configuring this
+through FKPA itself.
 
-If this global shortcut is defined, when pressed it will call search_auto_type to find entries
-matching against the current window title.  If found, it will auto-type the matching entry.
+If this global shortcut is defined, when pressed it will call
+search_auto_type to find entries matching against the current window
+title.  If found, it will auto-type the matching entry.
 
-Additionally, custom global shortcuts may defined in the comments section of the FKP database
-entries.  They have the form:
+Additionally, custom global shortcuts may defined in the comments
+section of the FKP database entries.  They have the form:
 
-   Custom-Global-Shortcut:  Ctrl-Alt-Shift w
+   Custom-Global-Shortcut: Ctrl-Alt-Shift w
 
 This allows for individual entry auto-typing to be called directly.
 
 =head1 AUTOTYPE SUPPORT
 
-Comment sections of entries may contain Auto-type entries in the following form:
+Version 2 databases natively support auto-type entries.  Comment
+sections of version 1 database entries may contain Auto-type entries
+in the following form:
 
     Auto-Type-Window: Admin Login*
     Auto-Type-Window: Login*
@@ -369,7 +379,7 @@ matching.
 If a window matches an Auto-Type-Window entry the corresponding
 Auto-Type item will be processed and "auto-typed" to the current window.
 
-Currently the following auto-type directives are supported.
+Currently the following auto-type directives are supported:
 
 =over 4
 
@@ -401,8 +411,9 @@ The enter character.
 
 =head1 STATUS
 
-This module and program are proof of concept.  They work, but are limited in their feature set.  There
-currently are no managment capabilities.
+This module and program are proof of concept.  They work, but are
+limited in their feature set.  There currently are no managment
+capabilities.
 
 =head1 AUTHOR
 

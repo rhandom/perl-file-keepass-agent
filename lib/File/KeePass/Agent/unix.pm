@@ -159,6 +159,7 @@ sub _bind_global_keys {
 
     my $cb_map = $self->{'global_cb_map'} = {};
     my $x = $self->x;
+    $self->{'bound_msg'} = '';
     foreach my $c (@callbacks) {
         my ($shortcut, $s_name, $callback) = @$c;
 
@@ -179,7 +180,9 @@ sub _bind_global_keys {
             $cb_map->{$code}->{$MOD} = $callback;
             push @{ $self->{'_bound_keys'} }, [$code, $MOD];
         }
-        print "Listening to ".$self->shortcut_name($shortcut)." for $s_name\n";
+        my $msg = "Listening to ".$self->shortcut_name($shortcut)." for $s_name\n";
+        print $msg;
+        $self->{'bound_msg'} .= $msg;
     }
 }
 
@@ -516,10 +519,15 @@ sub _close_file {
     $self->_init_state;
 }
 
+sub _clear {
+    return if shift->{'no_clear'};
+    return "\e[H\e[2J";
+}
+
 sub _menu_groups {
     my $self = shift;
 
-    my $t = "\n";
+    my $t = $self->_clear."\n";
     my $i = 0;
     my $cb = {};
     foreach my $pair (@{ $self->keepass }) {
@@ -532,6 +540,8 @@ sub _menu_groups {
             $t .= "    ($key)    $indent$g->{'title'}\n";
         }
     }
+
+    $t .= "\n".delete($self->{'bound_msg'}) if $self->{'bound_msg'};
     return [$t, $cb];
 }
 
@@ -545,14 +555,16 @@ sub _menu_entries {
         print "\nNo group entries in $g->{'title'}\n\n";
         return;
     }
-    my $t = "\n  File: $file\n";
+    my $t = $self->_clear."\n  File: $file\n";
     $t .= "  Group: $g->{'title'}\n";
+
+    my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
 
     my $i = 0;
     my $cb = {};
     for my $e (@E) {
         my $key = _a2z($i++);
-        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}];
+        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, $gid];
         $t .= "    ($key)    $e->{'title'}\n";
     }
     print $t;
@@ -560,21 +572,23 @@ sub _menu_entries {
 }
 
 sub _menu_entry {
-    my ($self, $file, $eid, $action, $extra) = @_;
+    my ($self, $file, $eid, $gid, $action, $extra) = @_;
     my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
     my $e = $kdb->find_entry({id => $eid}) || do { print "\nNo such matching eid ($eid) in file ($file)\n\n"; return };
+    my $g = $kdb->find_group({id => $gid}) || do { print "\nNo such matching gid ($gid) in file ($file)\n\n"; return };
 
     my $cb = {};
     my $t = "\n  File: $file\n";
+    $t .= "  Group: $g->{'title'}\n";
     $t .= "  Entry: $e->{'title'}\n";
 
-    $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, 'info'];
-    $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, 'comment'];
-    $cb->{'P'} = ['_menu_entry', $file, $e->{'id'}, 'print_pass'];
-    $cb->{'a'} = ['_menu_entry', $file, $e->{'id'}, 'auto_type'];
-    $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'password'];
-    $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'username'];
-    $cb->{'U'} = ['_menu_entry', $file, $e->{'id'}, 'copy', 'url'];
+    $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'info'];
+    $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'comment'];
+    $cb->{'P'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'print_pass'];
+    $cb->{'a'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'auto_type'];
+    $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'password'];
+    $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'username'];
+    $cb->{'U'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'url'];
     $t .= "    (i)    Show entry information\n";
     $t .= "    (c)    Show entry comment\n";
     $t .= "    (P)    Print password\n";
@@ -584,7 +598,7 @@ sub _menu_entry {
     $t .= "    (U)    Copy url to clipboard\n";
 
     if (!$action) {
-        print $t;
+        print $self->_clear.$t;
     } elsif ($action eq 'info') {
         foreach my $k (sort keys %$e) {
             next if $k eq 'comment' || $k eq 'comment';
@@ -610,13 +624,14 @@ sub _menu_entry {
             print "$pass\n";
         }
     } elsif ($action eq 'auto_type') {
-        my @at = $e->{'comment'} =~ m{ ^Auto-Type(?:-\d+)?: \s* (.+?) \s*$ }mxg;
-        if (! @at) {
-            print "--No Auto-Type entry found in comment (defaulting to {PASSWORD}{ENTER})--\n";
-            $at[0] = "{PASSWORD}{ENTER}";
-        } elsif (@at > 1) {
+        my $at = $e->{'auto_type'} || [];
+        if (!@$at || !defined($at->[0]->{'keys'}) || !length($at->[0]->{'keys'})) {
+            print "--No Auto-Type entry found for entry (defaulting to {PASSWORD}{ENTER})--\n";
+            $at = [{keys => '{PASSWORD}{ENTER}'}];
+        } elsif (@$at > 1) {
             print "--Multiple Auto-Type entries found in comment - using the first one--\n";
         }
+        my $keys = $at->[0]->{'keys'};
         local $| = 1;
         print "\n";
         for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
@@ -626,7 +641,7 @@ sub _menu_entry {
         print "\rSending Auto-Type to window: $title            \n";
 
         $self->do_auto_type({
-            auto_type => $at[0],
+            auto_type => $keys,
             file => $file,
             entry => $e,
         }, $title, undef);
