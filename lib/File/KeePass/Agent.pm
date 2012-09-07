@@ -169,7 +169,7 @@ sub active_searches {
         foreach my $row ($self->active_entries) {
             my ($file, $entries) = @$row;
             foreach my $e (@$entries) {
-                foreach my $at ($e->{'auto_type'} || []) {
+                foreach my $at (@{ $e->{'auto_type'} || [] }) {
                     my ($win, $keys) = @$at{qw(window keys)};
                     next if ! defined($win) || ! length($win);
                     if (! defined($keys) || ! length($keys)) {
