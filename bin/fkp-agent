@@ -11,12 +11,21 @@ File::KeePass::Agent::run;
 
 =head1 USAGE
 
-   fkp-agent [keepass-filename.kbd [--pass=password]]
+   fkp-agent
+
+   fkp-agent keepass-filename.kbd
+
+   fkp-agent [keepass-filename.kbd --pass=password
+
+   fkp-agent [keepass-filename.kbd --pass=password
+
+   fkp-agent [keepass-filename.kbd --pass=password --keyfile=path/to/some.key
 
 If no file is specified, you will be prompted for the file.  If no
 password is supplied you will be prompted for the password.  Multiple
 files can be passed.  Each can likewise have a corresponding --pass
-entry.
+and or a --keyfile entry depending upon how the keepass file has been
+locked..
 
 You are then prompted for the password that will be used to open the
 file.
