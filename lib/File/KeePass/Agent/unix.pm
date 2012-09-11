@@ -46,7 +46,12 @@ sub prompt_for_file {
 
 sub prompt_for_pass {
     my ($self, $file) = @_;
-    return ''.prompt("Enter your master key for $file: ", -e => '*', -tty);
+    return ''.prompt("Enter your master password for $file: ", -e => '*', -tty);
+}
+
+sub prompt_for_keyfile {
+    my ($self, $file) = @_;
+    return ''.prompt("Enter a master key filename (optional) for $file: ", -tty);
 }
 
 sub home_dir {
@@ -456,8 +461,8 @@ sub _handle_term_input {
     } elsif ($cb->{$buf}) {
         print "\n" if !$had_nl;
         my ($method, @args) = @{ $cb->{$buf} };
-        my $new = $self->$method(@args) or return 1;
-        push @$state, $new;
+        my $new = $self->$method(@args) || return 1;
+        push @$state, $new if $new->[0];
     } elsif ($buf eq '+') {
         print "\n";
         my $file = $self->prompt_for_file({no_save => 1});
@@ -468,17 +473,8 @@ sub _handle_term_input {
             print "File \"$file\" does not exist.\n";
             return 1;
         }
-        my $pass;
-        my $k;
-        if (! defined $pass) {
-            while (!$k) {
-                $pass = $self->prompt_for_pass($file);
-                next if ! defined $pass;
-                last if ! length $pass;
-                $k = eval { $self->load_keepass($file, $pass) } or warn "Could not load database: $@";
-            }
-        }
-        $self->_init_state;
+        my $k = $self->_prompt_for_pass_and_key($file);
+        $self->_init_state if $k;
     } elsif ($buf eq '-') {
         print "\n  Close file\n";
         my $i = 0;
@@ -517,6 +513,7 @@ sub _close_file {
     my ($self, $file) = @_;
     $self->unload_keepass($file);
     $self->_init_state;
+    return [];
 }
 
 sub _clear {
@@ -556,7 +553,7 @@ sub _menu_entries {
         return;
     }
     my $t = $self->_clear."\n  File: $file\n";
-    $t .= "  Group: $g->{'title'}\n";
+    $t .= "    Group: $g->{'title'}\n";
 
     my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
 
@@ -565,7 +562,7 @@ sub _menu_entries {
     for my $e (@E) {
         my $key = _a2z($i++);
         $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, $gid];
-        $t .= "    ($key)    $e->{'title'}\n";
+        $t .= "      ($key)    $e->{'title'}\n";
     }
     print $t;
     return [$t, $cb];
@@ -579,8 +576,8 @@ sub _menu_entry {
 
     my $cb = {};
     my $t = "\n  File: $file\n";
-    $t .= "  Group: $g->{'title'}\n";
-    $t .= "  Entry: $e->{'title'}\n";
+    $t .= "    Group: $g->{'title'}\n";
+    $t .= "      Entry: $e->{'title'}\n";
 
     $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'info'];
     $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'comment'];
@@ -589,17 +586,20 @@ sub _menu_entry {
     $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'password'];
     $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'username'];
     $cb->{'U'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'url'];
-    $t .= "    (i)    Show entry information\n";
-    $t .= "    (c)    Show entry comment\n";
-    $t .= "    (P)    Print password\n";
-    $t .= "    (a)    Run Auto-Type in 5 seconds\n";
-    $t .= "    (p)    Copy password to clipboard\n";
-    $t .= "    (u)    Copy username to clipboard\n";
-    $t .= "    (U)    Copy url to clipboard\n";
+    $t .= "        (i)    Show entry information\n";
+    $t .= "        (c)    Show entry comment\n";
+    $t .= "        (P)    Print password\n";
+    $t .= "        (a)    Run Auto-Type in 5 seconds\n";
+    $t .= "        (p)    Copy password to clipboard\n";
+    $t .= "        (u)    Copy username to clipboard\n";
+    $t .= "        (U)    Copy url to clipboard\n";
 
     if (!$action) {
         print $self->_clear.$t;
-    } elsif ($action eq 'info') {
+        return [$t, $cb];
+    }
+
+    if ($action eq 'info') {
         foreach my $k (sort keys %$e) {
             next if $k eq 'comment' || $k eq 'comment';
             print "      $k: $e->{$k}\n";
@@ -654,7 +654,7 @@ sub _menu_entry {
     } else {
         print "--Unknown action $action--\n";
     }
-    return [$t, $cb];
+    return [];
 }
 
 sub _copy_to_clipboard {
