@@ -50,12 +50,14 @@ sub run {
         for (my $i = 0; $i < @ARGV; $i++) {
             my $file = $ARGV[$i];
             next if $file =~ /^--?\w+$/;
-            if ($ARGV[$i+1] && $ARGV[$i+1] =~ /^--?pass(?:word)?=(.+)/) {
-                push @pairs, [$file, $1];
+            my %erg;
+            while ($ARGV[$i+1] && $ARGV[$i+1] =~ /^--?(password|pass|keyfile)(?:(=)(.*))?$/) {
                 $i++;
-            } else {
-                push @pairs, [$file, undef];
+                $erg{$1} = $2 ? $3 : $ARGV[++$i];
             }
+            my $pass = exists($erg{'password'}) ? $erg{'password'} : $erg{'pass'};
+            $pass = [$pass, $erg{'keyfile'}] if exists($erg{'keyfile'});
+            push @pairs, [$file, $pass];
         }
     } else {
         my $file = $self->prompt_for_file or die "Cannot continue without kdb file\n";
@@ -75,12 +77,8 @@ sub run {
         my ($file, $pass) = @$pair;
         my $k;
         if (! defined $pass) {
-            while (!$k) {
-                $pass = $self->prompt_for_pass($file);
-                next if ! defined($pass) || !length($pass);
-                $k = eval { $self->load_keepass($file, $pass) };
-                warn "Could not load database: $@" if ! $k;
-            }
+            $k = $self->_prompt_for_pass_and_key($file);
+            print "Skipping file $file\n" if ! $k;
         } else {
             $k = $self->load_keepass($file, $pass);
         }
@@ -88,6 +86,31 @@ sub run {
 
     $self->main_loop;
 }
+
+sub _prompt_for_pass_and_key {
+    my ($self, $file) = @_;
+    while (1) {
+        my $pass = $self->prompt_for_pass($file);
+        if (! defined($pass) || !length($pass)) {
+            my $keyfile = $self->prompt_for_keyfile($file);
+            $pass = [$pass, $keyfile] if defined($keyfile) && length($keyfile);
+        }
+        my $k = eval { $self->load_keepass($file, $pass) };
+        my $err = $@;
+        if (! $k && defined($pass) && ref($pass) ne 'ARRAY' && length($pass)) {
+            my $keyfile = $self->prompt_for_keyfile($file);
+            if (defined($keyfile) && length($keyfile)) {
+                $pass = [$pass, $keyfile];
+                $k = eval { $self->load_keepass($file, $pass) };
+                $err = $@;
+            }
+        }
+        return if !defined($pass) || !length($pass);
+        warn "Could not load database: $@" if ! $k;
+        return $k
+    }
+}
+
 
 sub load_keepass {
     my ($self, $file, $pass) = @_;
@@ -271,8 +294,8 @@ __END__
 You may pass the name of the keepass filename that you would like to
 open.  Otherwise you are prompted for the file to open.
 
-You are then prompted for the password that will be used to open the
-file.
+You are then prompted for the password and/or the keyfile that will be
+used to open the file.
 
 See L<File::KeePass> for a listing of what KeyPass database features
 are currently handled.
