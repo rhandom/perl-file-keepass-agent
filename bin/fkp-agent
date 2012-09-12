@@ -7,7 +7,13 @@ fkp-agent - File::KeePass::Agent program
 =cut
 
 use File::KeePass::Agent;
-File::KeePass::Agent::run;
+
+if (@ARGV && $ARGV[0] =~ /^--?h(?:elp)?$/) {
+    require Pod::Usage;
+    Pod::Usage::pod2usage();
+}
+
+File::KeePass::Agent::run();
 
 =head1 USAGE
 
@@ -27,11 +33,10 @@ files can be passed.  Each can likewise have a corresponding --pass
 and or a --keyfile entry depending upon how the keepass file has been
 locked..
 
-You are then prompted for the password that will be used to open the
-file.
-
 See L<File::KeePass::Agent> for more information about what typical
 KeePass features are currently implemented.
+
+KeePass version 1 and version 2 databases are supported.
 
 =head1 STATUS
 
