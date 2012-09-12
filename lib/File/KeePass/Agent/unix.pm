@@ -12,7 +12,6 @@ use Carp qw(croak);
 use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
-use IO::Prompt qw(prompt);
 use Term::ReadKey qw(ReadMode GetControlChars);
 
 my @end;
@@ -52,7 +51,8 @@ sub prompt_for_file {
 
 sub prompt_for_pass {
     my ($self, $file) = @_;
-    return ''.prompt("Enter your master password for $file: ", -e => '*', -tty);
+    require IO::Prompt;
+    return ''.IO::Prompt::prompt("Enter your master password for $file: ", -e => '*', -tty);
 }
 
 sub prompt_for_keyfile {
