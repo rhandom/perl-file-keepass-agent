@@ -107,7 +107,7 @@ sub _prompt_for_pass_and_key {
         }
         return if !defined($pass) || !length($pass);
         warn "Could not load database: $@" if ! $k;
-        return $k
+        return $k if $k;
     }
 }
 
