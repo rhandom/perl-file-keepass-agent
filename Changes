@@ -1,3 +1,9 @@
+0.04
+    2012-09-12
+        * Support File::KeePass 2.00
+        * Add better interface
+        * Can read multiple databases at the same time
+
 0.03
     2012-06-13
         * No more X11::GUITest dependency - use native X11::Protocol
