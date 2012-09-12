@@ -643,7 +643,17 @@ sub _menu_entry {
         my $keys = $at->[0]->{'keys'};
         local $| = 1;
         print "\n";
-        for (reverse(1..5)) { print "\rRunning Auto-Type in $_..."; sleep 1 };
+        require IO::Select;
+        my $sel = IO::Select->new(\*STDIN);
+        for (reverse 1 .. 5) {
+            print "\rRunning Auto-Type in $_... (any key to cancel)";
+            my @fh = $sel->can_read(1);
+            if (@fh) {
+                read $fh[0], my $txt, 1;
+                print $self->_clear.$t."\n\nAuto-type cancelled\n";
+                return [];
+            }
+        }
         my ($wid) = $self->x->GetInputFocus;
         my $title = eval { $self->wm_name($wid) };
 
