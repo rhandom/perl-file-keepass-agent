@@ -590,18 +590,28 @@ sub _menu_entry {
 
     $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'info'];
     $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'comment'];
-    $cb->{'P'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'print_pass'];
+    $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'print_pass'];
     $cb->{'a'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'auto_type'];
-    $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'password'];
-    $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'username'];
-    $cb->{'U'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'url'];
+    $cb->{'1'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'password'];
+    $cb->{'2'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'username'];
+    $cb->{'3'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'url'];
+    $cb->{'4'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'title'];
+    $cb->{'5'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'comment'];
     $t .= "        (i)    Show entry information\n";
     $t .= "        (c)    Show entry comment\n";
-    $t .= "        (P)    Print password\n";
+    $t .= "        (p)    Print password\n";
     $t .= "        (a)    Run Auto-Type in 5 seconds\n";
-    $t .= "        (p)    Copy password to clipboard\n";
-    $t .= "        (u)    Copy username to clipboard\n";
-    $t .= "        (U)    Copy url to clipboard\n";
+    $t .= "        (1)    Copy password to clipboard\n";
+    $t .= "        (2)    Copy username to clipboard\n";
+    $t .= "        (3)    Copy url to clipboard\n";
+    $t .= "        (4)    Copy title to clipboard\n";
+    $t .= "        (5)    Copy comment to clipboard\n";
+    my $i = 6;
+    for my $key (sort keys %{ $e->{'strings'} || {} }) {
+        my $k = $i++;
+        $cb->{$k} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', $key];
+        $t .= "        ($k)    Copy string \"$key\" to clipboard\n";
+    }
 
     if (!$action) {
         print $self->_clear.$t;
@@ -611,7 +621,17 @@ sub _menu_entry {
     if ($action eq 'info') {
         foreach my $k (sort keys %$e) {
             next if $k eq 'comment' || $k eq 'comment';
-            print "      $k: $e->{$k}\n";
+            my $val = $e->{$k};
+            if (ref($val) eq 'ARRAY') {
+                next if $k eq 'history' && !@$val;
+                $val = "(Previous versions: ".scalar(@$val).")" if $k eq 'history';
+                $val = join '', map {"\n        \"$_->{'window'}\"  -->  \"$_->{'keys'}\""} @$val if $k eq 'auto_type';
+            } elsif (ref($val) eq 'HASH') {
+                next if $k eq 'binary' && ! scalar keys %$val;
+                $val = join '', map {"\n        \"$_\"  (".length($val->{$_})." bytes)"} sort keys %$val if $k eq 'binary';
+                $val = join '', map {"\n        \"$_\"  =  \"$val->{$_}\""} sort keys %$val if $k eq 'strings' || $k eq 'protected';
+            }
+            print "      $k: $val\n";
         }
     } elsif ($action eq 'comment') {
         print "-------------------\n";
@@ -665,7 +685,7 @@ sub _menu_entry {
             entry => $e,
         }, $title, undef);
     } elsif ($action eq 'copy') {
-        my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : $e->{$extra};
+        my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : exists($e->{$extra}) ? $e->{$extra} : $e->{'strings'}->{$extra};
         $data = '' if ! defined $data;
         $self->_copy_to_clipboard($data) || return;
         print "Sent $extra to clipboard\n";
