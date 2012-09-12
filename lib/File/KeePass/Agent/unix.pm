@@ -16,6 +16,7 @@ use IO::Prompt qw(prompt);
 use Term::ReadKey qw(ReadMode GetControlChars);
 
 my @end;
+my $cntl;
 END { $_->() for @end };
 
 sub init {
@@ -57,7 +58,65 @@ sub prompt_for_keyfile {
 
 sub _file_prompt {
     my ($self, $msg, $def) = @_;
-    return ''.prompt($msg, $def ? (-d => $def) : (), -tty);
+    $msg =~ s/(:\s*)$/ [$def]$1/ or $msg .= " [$def] " if $def;
+    print $msg;
+
+    my $fh = \*STDIN;
+    local $SIG{'INT'} = sub { ReadMode 'restore', $fh; exit };
+    push @end, sub { ReadMode 'restore', $fh };
+    ReadMode 'raw', $fh;
+    STDOUT->autoflush(1);
+
+    $cntl ||= {GetControlChars $fh};
+    my $buf = '';
+    my $last = '';
+    while (1) {
+        my $chr = getc $fh;
+        exit if $chr eq $cntl->{'INTERRUPT'} || $chr eq $cntl->{'EOF'};
+        last if $chr eq "\n";
+        if ($chr eq "\t") {
+            my $path = $buf;
+            my $node = ($path =~ s|/([^/]*)$|| || $path =~ s|^([^/]+)$||) ? $1 : '';
+            $path = '.' if ! length $path;
+            next if ! -d $path;
+            if (opendir my $dh, $path) {
+                my $qr = qr{^\Q$node\E};
+                my @entries = sort map {-d "$path/$_" ? "$_/" : $_} grep {length($node) ? $_ =~ $qr : $_ !~ /^\.\.?$/} readdir $dh;
+                closedir $dh;
+                if (@entries && length $node) {
+                    my $stem = $node;
+                    for my $i (length($stem)+1 .. length($entries[0])) {
+                        my $new = substr $entries[0], 0, $i;
+                        my $qr = qr{^\Q$new\E};
+                        last if @entries != grep {$_ =~ $qr} @entries;
+                        $stem = $new;
+                    }
+                    if ($stem gt $node) {
+                        $buf =~ s|[^/]*$|$stem|;
+                        $last = '';
+                    }
+                    $buf .= ' ' if -e $buf && !-d $buf;
+                    print "\r$msg$buf";
+                }
+                if ($last ne "\t") {
+                    $last = "\t";
+                    next;
+                }
+
+                print "\n(@entries)\n";
+                print "\r$msg$buf";
+            }
+            $last = $chr;
+            next;
+        }
+        print $chr;
+        $last = $chr;
+        $buf .= $chr;
+    }
+    ReadMode 'restore', $fh;
+    pop @end;
+    return $def if $def && !length $buf;
+    return $buf;
 }
 
 sub home_dir {
@@ -438,7 +497,6 @@ sub key_release {
 
 ###----------------------------------------------------------------###
 
-my $cntl;
 sub _handle_term_input {
     my ($self, $fh) = @_;
 
@@ -454,7 +512,6 @@ sub _handle_term_input {
         last if $chr eq "\n";
     }
     my $had_nl = chomp $buf;
-    return 0 if $buf eq 'q' || $buf eq 'quit' || $buf eq 'exit';
     print "\r$buf" if length $buf > 1;
 
     my $state = $self->{'state'} ||= [$self->_menu_groups];
