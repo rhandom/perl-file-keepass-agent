@@ -555,15 +555,24 @@ sub _menu_entries {
     my $t = $self->_clear."\n  File: $file\n";
     $t .= "    Group: $g->{'title'}\n";
 
-    my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
-
     my $i = 0;
     my $cb = {};
+    my @e;
+    my $max = 0;
     for my $e (@E) {
         my $key = _a2z($i++);
         $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, $gid];
-        $t .= "      ($key)    $e->{'title'}\n";
+        push @e, "      ($key)   $e->{'title'}";
+        $max = length($e[-1]) if length($e[-1]) > $max;
     }
+
+    my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
+    my $cols = int($W / ($max || 1));
+    my $rows = @e / $cols; $rows = int(1 + $rows) if int($rows) != $rows;
+    $rows = 8 if $rows < 8;
+    my @row;
+    $row[$_%$rows]->[$_/$rows] = $e[$_] for 0 .. @e;
+    $t .= sprintf("%-${max}s"x@$_, @$_)."\n" for @row;
     print $t;
     return [$t, $cb];
 }
