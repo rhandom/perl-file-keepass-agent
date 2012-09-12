@@ -29,7 +29,8 @@ sub prompt_for_file {
     if ($last_file && $last_file =~ m{ ^./..(/.+)$ }x) {
         $last_file = $self->home_dir . $1;
     }
-    my $file = ''.prompt("Choose the kdb file to open: ", ($last_file ? (-d => $last_file) : ()), -tty);
+    $last_file = '' if $last_file && grep {$_->[0] eq $last_file} @{ $self->keepass };
+    my $file = $self->_file_prompt("Choose the kdb file to open: ", $last_file);
     if ($last_file
         && $file
         && $last_file ne $file
@@ -51,7 +52,12 @@ sub prompt_for_pass {
 
 sub prompt_for_keyfile {
     my ($self, $file) = @_;
-    return ''.prompt("Enter a master key filename (optional) for $file: ", -tty);
+    return $self->_file_prompt("Enter a master key filename (optional) for $file: ");
+}
+
+sub _file_prompt {
+    my ($self, $msg, $def) = @_;
+    return ''.prompt($msg, $def ? (-d => $def) : (), -tty);
 }
 
 sub home_dir {
@@ -463,28 +469,6 @@ sub _handle_term_input {
         my ($method, @args) = @{ $cb->{$buf} };
         my $new = $self->$method(@args) || return 1;
         push @$state, $new if $new->[0];
-    } elsif ($buf eq '+') {
-        print "\n";
-        my $file = $self->prompt_for_file({no_save => 1});
-        if (!$file) {
-            print "No file specified.\n";
-            return 1;
-        } elsif (!-e $file) {
-            print "File \"$file\" does not exist.\n";
-            return 1;
-        }
-        my $k = $self->_prompt_for_pass_and_key($file);
-        $self->_init_state if $k;
-    } elsif ($buf eq '-') {
-        print "\n  Close file\n";
-        my $i = 0;
-        my $cb = {};
-        for my $file (map {$_->[0]} @{ $self->keepass }) {
-            my $key = _a2z($i++);
-            $cb->{$key} = ['_close_file', $file];
-            print "    ($key)    $file\n";
-        }
-        splice @$state, 1, +@$state, ['', $cb];
     } elsif (length($buf) && $buf ne "\e") {
         print "\n" if !$had_nl;
         print "Unknown option ($buf)\n";
@@ -538,7 +522,46 @@ sub _menu_groups {
         }
     }
 
+    $t .= "\n";
+    $t .= "    (+)    Open another keepass database\n";
+    $t .= "    (-)    Close a keepass database\n" if @{ $self->keepass };
+    $cb->{'+'} = ['_action_open'];
+    $cb->{'-'} = ['_action_close'];
+
     $t .= "\n".delete($self->{'bound_msg'}) if $self->{'bound_msg'};
+    return [$t, $cb];
+}
+
+sub _action_open {
+    my $self = shift;
+    print "\n";
+    my $file = $self->prompt_for_file({no_save => 1});
+    if (!$file) {
+        print "No file specified.\n";
+        return [];
+    } elsif (!-e $file) {
+        print "File \"$file\" does not exist.\n";
+        return [];
+    } else {
+        my $k = $self->_prompt_for_pass_and_key($file);
+        print "Failed to open file $file\n";
+        $self->_init_state if $k;
+    }
+    return [];
+}
+
+sub _action_close {
+    my $self = shift;
+    print "\n  Close file\n";
+    my $i = 0;
+    my $cb = {};
+    my $t = '';
+    for my $file (map {$_->[0]} @{ $self->keepass }) {
+        my $key = _a2z($i++);
+        $cb->{$key} = ['_close_file', $file];
+        $t .= "    ($key)    $file\n";
+    }
+    print $t;
     return [$t, $cb];
 }
 
