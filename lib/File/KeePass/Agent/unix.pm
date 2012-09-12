@@ -19,6 +19,10 @@ my @end;
 my $cntl;
 END { $_->() for @end };
 
+my $raw;
+sub _term_raw { ReadMode 'raw', \*STDOUT; $raw = 1 }
+sub _term_restore { ReadMode 'restore', \*STDOUT; ($raw, my $prev) = (0, $raw); return $prev }
+
 sub init {
     my $self = shift;
     $self->{'no_menus'} = grep {$_ eq '--no_menus'} @ARGV;
@@ -59,64 +63,16 @@ sub prompt_for_keyfile {
 sub _file_prompt {
     my ($self, $msg, $def) = @_;
     $msg =~ s/(:\s*)$/ [$def]$1/ or $msg .= " [$def] " if $def;
-    print $msg;
+    require Term::ReadLine;
 
-    my $fh = \*STDIN;
-    local $SIG{'INT'} = sub { ReadMode 'restore', $fh; exit };
-    push @end, sub { ReadMode 'restore', $fh };
-    ReadMode 'raw', $fh;
-    STDOUT->autoflush(1);
+    my $was_raw = _term_restore();
+    my $out = Term::ReadLine->new('fkp')->readline($msg);
+    _term_raw() if $was_raw;
 
-    $cntl ||= {GetControlChars $fh};
-    my $buf = '';
-    my $last = '';
-    while (1) {
-        my $chr = getc $fh;
-        exit if $chr eq $cntl->{'INTERRUPT'} || $chr eq $cntl->{'EOF'};
-        last if $chr eq "\n";
-        if ($chr eq "\t") {
-            my $path = $buf;
-            my $node = ($path =~ s|/([^/]*)$|| || $path =~ s|^([^/]+)$||) ? $1 : '';
-            $path = '.' if ! length $path;
-            next if ! -d $path;
-            if (opendir my $dh, $path) {
-                my $qr = qr{^\Q$node\E};
-                my @entries = sort map {-d "$path/$_" ? "$_/" : $_} grep {length($node) ? $_ =~ $qr : $_ !~ /^\.\.?$/} readdir $dh;
-                closedir $dh;
-                if (@entries && length $node) {
-                    my $stem = $node;
-                    for my $i (length($stem)+1 .. length($entries[0])) {
-                        my $new = substr $entries[0], 0, $i;
-                        my $qr = qr{^\Q$new\E};
-                        last if @entries != grep {$_ =~ $qr} @entries;
-                        $stem = $new;
-                    }
-                    if ($stem gt $node) {
-                        $buf =~ s|[^/]*$|$stem|;
-                        $last = '';
-                    }
-                    $buf .= ' ' if -e $buf && !-d $buf;
-                    print "\r$msg$buf";
-                }
-                if ($last ne "\t") {
-                    $last = "\t";
-                    next;
-                }
-
-                print "\n(@entries)\n";
-                print "\r$msg$buf";
-            }
-            $last = $chr;
-            next;
-        }
-        print $chr;
-        $last = $chr;
-        $buf .= $chr;
-    }
-    ReadMode 'restore', $fh;
-    pop @end;
-    return $def if $def && !length $buf;
-    return $buf;
+    $out = '' if ! defined $out;
+    $out =~ s/\s+$//;
+    $out =~ s{~/}{$self->home_dir.'/'}e;
+    return length($out) ? $out : $def;
 }
 
 sub home_dir {
@@ -273,9 +229,9 @@ sub _listen {
     require IO::Select;
 
     my $in_fh = \*STDIN;
-    local $SIG{'INT'} = sub { ReadMode 'restore', $in_fh; exit };
-    push @end, sub { ReadMode 'restore', $in_fh };
-    ReadMode 'raw',    $in_fh;
+    local $SIG{'INT'} = sub { _term_restore(); exit };
+    push @end, sub { _term_restore() };
+    _term_raw();
 
     my $x_fh = $x->{'connection'}->fh;
     $x_fh->autoflush(1);
