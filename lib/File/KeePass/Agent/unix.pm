@@ -62,11 +62,11 @@ sub prompt_for_keyfile {
 
 sub _file_prompt {
     my ($self, $msg, $def) = @_;
-    $msg =~ s/(:\s*)$/ [$def]$1/ or $msg .= " [$def] " if $def;
+    #$msg =~ s/(:\s*)$/ [$def]$1/ or $msg .= " [$def] " if $def;
     require Term::ReadLine;
 
     my $was_raw = _term_restore();
-    my $out = Term::ReadLine->new('fkp')->readline($msg);
+    my $out = Term::ReadLine->new('fkp')->readline($msg, $def);
     _term_raw() if $was_raw;
 
     $out = '' if ! defined $out;
@@ -648,6 +648,11 @@ sub _menu_entry {
         $cb->{$k} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', $key];
         $t .= "        ($k)    Copy string \"$key\" to clipboard\n";
     }
+    for my $key (sort keys %{ $e->{'binary'} || {} }) {
+        my $k = $i++;
+        $cb->{$k} = ['_menu_entry', $file, $e->{'id'}, $gid, 'save', $key];
+        $t .= "        ($k)    Save binary \"$key\" as...\n";
+    }
 
     if (!$action) {
         print $self->_clear.$t;
@@ -726,6 +731,19 @@ sub _menu_entry {
         $self->_copy_to_clipboard($data) || return;
         print "Sent $extra to clipboard\n";
         print "--Zero length $extra--\n" if ! length $data;
+    } elsif ($action eq 'save') {
+        if (my $file = $self->_file_prompt("Save file \"$extra\" as: ", $extra)) {
+            if (open my $fh, ">", $file) {
+                binmode $fh;
+                print $fh $e->{'binary'}->{$extra};
+                close $fh;
+                print "Saved \"$extra\" as \"$file\"\n";
+            } else {
+                print "Could not open $file for writing: $!\n";
+            }
+        } else {
+            print "File not saved\n";
+        }
     } else {
         print "--Unknown action $action--\n";
     }
