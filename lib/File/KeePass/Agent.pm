@@ -13,9 +13,9 @@ package File::KeePass::Agent;
 use strict;
 use warnings;
 use Carp qw(croak);
-use File::KeePass '2.00';
+use File::KeePass '2.02';
 
-our $VERSION = '2.00';
+our $VERSION = '2.01';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
