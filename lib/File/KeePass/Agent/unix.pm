@@ -667,7 +667,7 @@ sub _menu_entry {
                 $val = join '', map {"\n        \"$_\"  (".length($val->{$_})." bytes)"} sort keys %$val if $k eq 'binary';
                 $val = join '', map {"\n        \"$_\"  =  \"$val->{$_}\""} sort keys %$val if $k eq 'strings' || $k eq 'protected';
             }
-            print "      $k: $val\n";
+            print "      $k: ".(defined($val) ? $val : "(null)")."\n";
         }
     } elsif ($action eq 'comment') {
         print "-------------------\n";
