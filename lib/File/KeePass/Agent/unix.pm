@@ -679,7 +679,7 @@ sub _menu_entry {
         print "-------------------\n";
         if (! defined $e->{'comment'}) {
             print "--No comment--\n";
-        } elsif (length $e->{'comment'}) {
+        } elsif (! length $e->{'comment'}) {
             print "--Empty comment--\n";
         } else {
             print $e->{'comment'};
