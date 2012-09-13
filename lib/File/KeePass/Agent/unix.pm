@@ -34,13 +34,13 @@ sub prompt_for_file {
         $last_file = $self->home_dir . $1;
     }
     $last_file = '' if $last_file && grep {$_->[0] eq $last_file} @{ $self->keepass };
-    my $file = $self->_file_prompt("Choose the kdb file to open: ", $last_file);
+    my $file = $self->_file_prompt("Choose the KeePass database file to open: ", $last_file);
     if ($last_file
         && $file
         && $last_file ne $file
         && -e $file
         && !$args->{'no_save'}
-        && prompt("Save $file as default kdb database? ", -yn, -d => 'y', -tty)) {
+        && prompt("Save $file as default KeePass database? ", -yn, -d => 'y', -tty)) {
         my $home = $self->home_dir;
         my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
         $self->write_config(last_file => $copy);
