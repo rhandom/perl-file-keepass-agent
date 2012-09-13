@@ -752,28 +752,22 @@ sub _menu_entry {
 
 sub _copy_to_clipboard {
     my ($self, $data) = @_;
-
     if (my $klip = eval {
         require Net::DBus;
         my $bus = Net::DBus->find;
         my $obj = $bus->get_service("org.freedesktop.DBus")->get_object("/org/freedesktop/DBus");
         my %h = map {$_ => 1} @{ $obj->ListNames };
         die "No klipper service found" unless $h{'org.kde.klipper'};
-
         return $bus->get_service('org.kde.klipper')->get_object('/klipper');
     }) {
-        #my $i = $k->_introspector;
-        #debug [sort $i->list_interfaces("org.kde.klipper.klipper")];
-        #debug [sort $i->list_methods("org.kde.klipper.klipper")];
-        #debug [$i->get_method_params("org.kde.klipper.klipper", 'getClipboardContents')];
-        #debug [$i->get_method_returns("org.kde.klipper.klipper", 'getClipboardContents')];
         $klip->setClipboardContents($data);
-        # TODO - set a timeout to clear the clipboard
         return 1;
+    } elsif (-x '/usr/bin/xclip' && open(my $prog, '|-', '/usr/bin/xclip', '-selection', 'clipboard')) {
+        print $prog $data;
+        close $prog;
     } else {
         print "--No current clipboard service available\n";
         return;
-        # TODO - fallback to xclip or Clipboard
     }
 }
 
