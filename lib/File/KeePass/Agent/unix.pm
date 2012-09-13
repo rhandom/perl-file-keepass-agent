@@ -40,7 +40,8 @@ sub prompt_for_file {
         && $last_file ne $file
         && -e $file
         && !$args->{'no_save'}
-        && prompt("Save $file as default KeePass database? ", -yn, -d => 'y', -tty)) {
+        && require IO::Prompt
+        && IO::Prompt::prompt("Save $file as default KeePass database? ", -yn, -d => 'y', -tty)) {
         my $home = $self->home_dir;
         my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
         $self->write_config(last_file => $copy);

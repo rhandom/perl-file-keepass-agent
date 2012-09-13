@@ -1,3 +1,7 @@
+2.01
+    2012-09-13
+        * Fix a bug in the save as prompt
+
 2.00
     2012-09-12
         * Support File::KeePass 2.00
