@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-File::KeePass::Agent - Application agent for working with File::KeePass files
+File::KeePass::Agent - Application agent for working with File::KeePass objects
 
 =cut
 
@@ -15,7 +15,7 @@ use warnings;
 use Carp qw(croak);
 use File::KeePass '2.00';
 
-our $VERSION = '0.04';
+our $VERSION = '2.00';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
