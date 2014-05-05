@@ -15,7 +15,7 @@ use warnings;
 use Carp qw(croak);
 use File::KeePass '2.02';
 
-our $VERSION = '2.01';
+our $VERSION = '2.02';
 our @ISA;
 BEGIN {
     my $os = lc($^O);
@@ -438,9 +438,13 @@ This module and program are proof of concept.  They work, but are
 limited in their feature set.  There currently are no managment
 capabilities.
 
+=head1 CORE REPOSITORY
+
+https://github.com/rhandom/perl-file-keepass-agent
+
 =head1 AUTHOR
 
-Paul Seamons <paul at seamons dot com>
+Paul Seamons <paul@seamons.com>
 
 =head1 LICENSE
 
