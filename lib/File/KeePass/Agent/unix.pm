@@ -40,14 +40,19 @@ sub prompt_for_file {
         && $last_file ne $file
         && -e $file
         && !$args->{'no_save'}
-        && require IO::Prompt
-        && IO::Prompt::prompt("Save $file as default KeePass database? ", -yn, -d => 'y', -tty)) {
+        && $self->prompt_yes_no("Save $file as default KeePass database? ")) {
         my $home = $self->home_dir;
         my $copy = ($file =~ m{^\Q$home\E(/.+)$ }x) ? "./..$1" : $file;
         $self->write_config(last_file => $copy);
     }
 
     return $file;
+}
+
+sub prompt_yes_no {
+    my ($self, $msg, $def) = @_;
+    require IO::Prompt || return 0;
+    return IO::Prompt::prompt($msg, -yn, -d => $def || 'y', -tty)
 }
 
 sub prompt_for_pass {
@@ -266,6 +271,7 @@ sub read_x_event {
     my ($wid) = $x->GetInputFocus;
     my $orig  = $wid;
     my $title = eval { $self->wm_name($wid) };
+    my $err = $@;
     while (!defined($title) || ! length($title)) {
         last if $wid == $x->root;
         my ($root, $parent) = $x->QueryTree($wid);
@@ -369,7 +375,9 @@ sub properties {
 
 sub wm_name {
     my ($self, $wid) = @_;
-    return $self->property($wid, 'WM_NAME');
+    my $name = $self->property($wid, 'WM_NAME');
+    $name = $self->property($wid, '_NET_WM_NAME') if !defined($name) || !length($name);
+    return $name;
 }
 
 sub all_children {
@@ -610,6 +618,9 @@ sub _menu_entries {
     my @row;
     $row[$_%$rows]->[$_/$rows] = $e[$_] for 0 .. @e;
     $t .= sprintf("%-${max}s"x@$_, @$_)."\n" for @row;
+    $t .= "\n";
+    $t .= "    (+)    Add a new entry\n";
+    $cb->{'+'} = ['_action_edit'];
     print $t;
     return [$t, $cb];
 }
@@ -627,6 +638,7 @@ sub _menu_entry {
 
     $cb->{'i'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'info'];
     $cb->{'c'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'comment'];
+    $cb->{'u'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'print_user'];
     $cb->{'p'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'print_pass'];
     $cb->{'a'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'auto_type'];
     $cb->{'1'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'password'];
@@ -634,8 +646,11 @@ sub _menu_entry {
     $cb->{'3'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'url'];
     $cb->{'4'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'title'];
     $cb->{'5'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'copy', 'comment'];
+    $cb->{'e'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'edit'];
+    $cb->{'d'} = ['_menu_entry', $file, $e->{'id'}, $gid, 'delete'];
     $t .= "        (i)    Show entry information\n";
     $t .= "        (c)    Show entry comment\n";
+    $t .= "        (u)    Print username\n";
     $t .= "        (p)    Print password\n";
     $t .= "        (a)    Run Auto-Type in 5 seconds\n";
     $t .= "        (1)    Copy password to clipboard\n";
@@ -643,6 +658,8 @@ sub _menu_entry {
     $t .= "        (3)    Copy url to clipboard\n";
     $t .= "        (4)    Copy title to clipboard\n";
     $t .= "        (5)    Copy comment to clipboard\n";
+    $t .= "        (e)    Edit entry\n";
+    $t .= "        (d)    Delete entry\n";
     my $i = 6;
     for my $key (sort keys %{ $e->{'strings'} || {} }) {
         my $k = $i++;
@@ -662,7 +679,7 @@ sub _menu_entry {
 
     if ($action eq 'info') {
         foreach my $k (sort keys %$e) {
-            next if $k eq 'comment' || $k eq 'comment';
+            next if $k eq 'comment';
             my $val = $e->{$k};
             if (ref($val) eq 'ARRAY') {
                 next if $k eq 'history' && !@$val;
@@ -684,6 +701,15 @@ sub _menu_entry {
         } else {
             print $e->{'comment'};
             print "\n--No newline--\n" if $e->{'comment'} !~ /\n$/;
+        }
+    } elsif ($action eq 'print_user') {
+        my $user = $e->{'username'};
+        if (!defined $user) {
+            print "--No username defined--\n";
+        } elsif (!length $user) {
+            print "--Zero length username--\n";
+        } else {
+            print "$user\n";
         }
     } elsif ($action eq 'print_pass') {
         my $pass = $kdb->locked_entry_password($e);
@@ -732,6 +758,12 @@ sub _menu_entry {
         $self->_copy_to_clipboard($data) || return;
         print "Sent $extra to clipboard\n";
         print "--Zero length $extra--\n" if ! length $data;
+    } elsif ($action eq 'delete') {
+        if ($self->prompt_yes_no("Would you like to delete this entry? ", "n")) {
+            print "Should delete\n";
+        } else {
+            print "Not deleting\n";
+        }
     } elsif ($action eq 'save') {
         if (my $file = $self->_file_prompt("Save file \"$extra\" as: ", $extra)) {
             if (open my $fh, ">", $file) {
@@ -815,6 +847,9 @@ sub _ini_write {
     close $fh;
 }
 
+1;
+
+__END__
 
 =head1 DESCRIPTION
 
@@ -933,4 +968,3 @@ This module may be distributed under the same terms as Perl itself.
 
 =cut
 
-1;
