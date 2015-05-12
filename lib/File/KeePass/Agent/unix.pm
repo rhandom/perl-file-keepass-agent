@@ -13,6 +13,16 @@ use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
 use Term::ReadKey qw(ReadMode GetControlChars);
+my $use_guitest;
+BEGIN {
+    $use_guitest = 1 if ($ENV{'KDE_SESSION_VERSION'} || 0) eq '5';
+    $use_guitest = 2 if $ENV{'FKP_USE_GUITEST'};
+    if ($use_guitest) {
+        eval { require X11::GUITest }
+            || die "Failed to load X11::GUITest which is necessary for communicating (ATM) with network based windows: $@\n";
+        import X11::GUITest qw(SendKeys QuoteStringForSendKeys);
+    }
+};
 
 my @end;
 my $cntl;
@@ -376,8 +386,9 @@ sub properties {
 sub wm_name {
     my ($self, $wid) = @_;
     my $name = $self->property($wid, 'WM_NAME');
-    $name = $self->property($wid, '_NET_WM_NAME') if !defined($name) || !length($name);
-    return $name;
+    return wantarray ? ($name, 0) : $name if defined($name) && length($name);
+    $name = $self->property($wid, '_NET_WM_NAME');
+    return wantarray ? ($name, 1) : $name;
 }
 
 sub all_children {
@@ -395,9 +406,11 @@ sub all_children {
 
 sub send_key_press {
     my ($self, $auto_type, $entry, $title, $event) = @_;
-    warn "Auto-Type: $entry->{'title'}\n" if ref($entry);
+    my $require_guitest = ($use_guitest || 0) == 2;
+    warn "Auto-Type: $entry->{'title'}".($require_guitest ? " via GUITest" : '')."\n" if ref($entry);
 
     my ($wid) = $self->x->GetInputFocus;
+    my ($name, $is_net) = $self->wm_name($wid);
 
     # wait for all other keys to clear out before we begin to type
     my $i = 0;
@@ -406,11 +419,20 @@ sub send_key_press {
         select(undef,undef,undef,.05)
     }
 
-    my $pre_gap = $self->read_config('pre_gap')   * .001;
+    my $pre_gap = $self->read_config('pre_gap') * .001;
+    select undef, undef, undef, $pre_gap if $pre_gap;
+
+    if ($is_net || $require_guitest) {
+        warn "((( $auto_type )))\n";
+        $auto_type = X11::GUITest::QuoteStringForSendKeys($auto_type);
+        X11::GUITest::SendKeys($auto_type); # no window change protection
+        warn "Used X11::GUITest\n" if ! $require_guitest;
+        return;
+    }
+
     my $delay   = $self->read_config('key_delay') * .001;
     my $keymap = $self->keymap;
     my $shift  = $self->requires_shift;
-    select undef, undef, undef, $pre_gap if $pre_gap;
     for my $key (split //, $auto_type) {
         my ($_wid) = $self->x->GetInputFocus; # send the key stroke
         if ($_wid != $wid) {
