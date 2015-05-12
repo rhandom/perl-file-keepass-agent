@@ -423,7 +423,6 @@ sub send_key_press {
     select undef, undef, undef, $pre_gap if $pre_gap;
 
     if ($is_net || $require_guitest) {
-        warn "((( $auto_type )))\n";
         $auto_type = X11::GUITest::QuoteStringForSendKeys($auto_type);
         X11::GUITest::SendKeys($auto_type); # no window change protection
         warn "Used X11::GUITest\n" if ! $require_guitest;
