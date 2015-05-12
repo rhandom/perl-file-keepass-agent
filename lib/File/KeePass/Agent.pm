@@ -240,15 +240,16 @@ sub do_no_match {
 sub do_auto_type {
     my ($self, $match, $title, $event) = @_;
     my ($auto_type, $file, $entry) = @$match{qw(auto_type file entry)};
-    $auto_type =~ s{ \{ TAB      \} }{\t}xg;
-    $auto_type =~ s{ \{ ENTER    \} }{\n}xg;
-    $auto_type =~ s{ \{ PASSWORD \} }{
-        my %kdbs = map {$_->[0], $_->[1]} @{ $self->keepass };
-        $kdbs{$file}->locked_entry_password($entry);
-    }xeg;
-    $auto_type =~ s{ \{ (\w+)    \} }{
+    $auto_type =~ s{ \{ (\w+) \} }{
         my $key = lc $1;
-        defined($entry->{$key}) ? $entry->{$key} : return $self->do_auto_type_unsupported($key);
+          $key eq 'tab'      ? "\t"
+        : $key eq 'enter'    ? "\n"
+        : $key eq 'password' ? do {
+            my %kdbs = map {$_->[0], $_->[1]} @{ $self->keepass };
+            $kdbs{$file}->locked_entry_password($entry);
+        }
+        : defined($entry->{$key}) ? $entry->{$key}
+        : return $self->do_auto_type_unsupported($key);
     }xeg;
     return if ! length $auto_type;
     return if $self->{'_last_send'} && time - $self->{'_last_send'} < 2;
