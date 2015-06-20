@@ -1,7 +1,7 @@
 use ExtUtils::MakeMaker;
 
 ###----------------------------------------------------------------###
-#  Copyright 2014 - Paul Seamons                                     #
+#  Copyright 2015 - Paul Seamons                                     #
 #  Distributed under the GNU General Public License without warranty #
 ###----------------------------------------------------------------###
 

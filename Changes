@@ -1,3 +1,11 @@
+2.03
+    2015-06-20
+        * Allow for X11::GUITest fallback on KDE5
+
+2.02
+    2012-09-13
+        * Fix display of comment on entries
+
 2.01
     2012-09-13
         * Fix a bug in the save as prompt

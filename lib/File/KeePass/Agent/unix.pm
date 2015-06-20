@@ -423,7 +423,7 @@ sub send_key_press {
     select undef, undef, undef, $pre_gap if $pre_gap;
 
     if ($is_net || $require_guitest) {
-        $auto_type = X11::GUITest::QuoteStringForSendKeys($auto_type);
+        $auto_type =~ s/([%^+#&~(){}])/\{$1\}/g;
         X11::GUITest::SendKeys($auto_type); # no window change protection
         warn "Used X11::GUITest\n" if ! $require_guitest;
         return;
@@ -820,7 +820,7 @@ sub _copy_to_clipboard {
         print $prog $data;
         close $prog;
     } else {
-        print "--No current clipboard service available\n";
+        print "--No current clipboard service available (install one of Net::DBus or xclip\n";
         return;
     }
 }
@@ -909,14 +909,17 @@ be passed the current active window title and the generating event.
 
    $self->$callback($window_title, \%event);
 
-This method use X11::Protocol to bind the shortcuts, then listens for the events to happen.
+This method use X11::Protocol to bind the shortcuts, then listens for
+the events to happen.
 
 =item C<send_key_press>
 
-Takes an auto-type string, the keepass entry that generated the request,
-the current active window title, and the generating event.
+Takes an auto-type string, the keepass entry that generated the
+request, the current active window title, and the generating event.
 
-This method uses X11::GUITest to "type" the chosen text to the X server.
+This method prefers to use X11::Protocol to "type" the chosen text,
+but will fail back to X11::GUITest if needed (You can also set ENV
+FKP_USE_GUITEST to force it to use GUITest all of the time).
 
 =back
 
