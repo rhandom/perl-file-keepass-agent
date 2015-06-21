@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 =head1 NAME
 
@@ -6,7 +6,7 @@ File::KeePass::Agent - Application agent for working with File::KeePass objects
 
 =cut
 
-File::KeePass::Agent::run(),exit if $0 eq __FILE__;
+File::KeePass::Agent::run(),exit if ! caller;
 
 package File::KeePass::Agent;
 

@@ -253,6 +253,9 @@ sub _listen {
     $x_fh->autoflush(1);
     STDOUT->autoflush(1);
 
+    pipe(my $aux_fh, my $aux_write);
+    $self->{'aux_write'} = $aux_write;
+
     my $sel = IO::Select->new($x_fh, $in_fh);
 
     # handle events as they occur
@@ -263,6 +266,8 @@ sub _listen {
         next if ! $fh;
         if ($fh == $in_fh) {
             $self->_handle_term_input($fh) || last;
+        } elsif ($fh == $aux_fh) {
+            $self->_handle_aux($fh) || last;
         } else {
             $self->read_x_event;
         }
@@ -500,24 +505,22 @@ sub _handle_term_input {
     my $had_nl = chomp $buf;
     print "\r$buf" if length $buf > 1;
 
-    my $state = $self->{'state'} ||= [$self->_menu_groups];
-    my $cur   = $state->[-1];
-    my ($text, $cb) = @$cur;
+    my $cur = $self->_state->[-1];
+    my ($text,  $cb) = @$cur;
     my $matches = grep {$_ =~ /^\Q$buf\E/} keys %$cb;
     if (!$had_nl && $matches > 1) {
         $self->{'buffer'} = $buf;
         print "\r$buf" if length($buf) eq 1;# \r";
-    } elsif ($cb->{$buf}) {
+    } elsif (! length($buf) || $buf eq "\e") {
+        pop @{ $self->_state };
+        $self->_render_state;
+    } elsif (my $new_state = $cb->{$buf}) {
         print "\n" if !$had_nl;
-        my ($method, @args) = @{ $cb->{$buf} };
-        my $new = $self->$method(@args) || return 1;
-        push @$state, $new if $new->[0];
-    } elsif (length($buf) && $buf ne "\e") {
+        $self->_push_state($new_state);
+        $self->_render_state;
+    } else {
         print "\n" if !$had_nl;
         print "Unknown option ($buf)\n";
-    } else {
-        pop @$state if @$state > 1;
-        print $state->[-1]->[0];
     }
 
     return 1;
@@ -526,21 +529,45 @@ sub _handle_term_input {
 sub _init_state {
     my ($self, $first_time) = @_;
     $self->_bind_global_keys($self->active_callbacks) if !$first_time; # unbinds previous ones
-    my $state = $self->{'state'} = [$self->_menu_groups];
-    print $state->[-1]->[0];
+    delete $self->{'state'};
+    $self->_render_state;
 }
 
-my @a2z = ('a'..'z', 0..9);
-sub _a2z {
-    my $i = shift;
-    return $a2z[$i % @a2z] x (1 + ($i / @a2z));
+sub _render_state {
+    my $self = shift;
+    my $state = $self->_state;
+    my $cur = $state->[-1] || die "Missing a default state\n";
+    my ($text, $cb) = @$cur;
+    if (! ref $text) {
+        print $text;
+        return;
+    }
+    my ($meth, @args) = @$text;
+    my ($new_text, $new_cb) = $self->$meth(@args);
+    $cur->[1] = $new_cb if ref $new_cb;
+    print $new_text if defined $new_text;
+    print $self->{'buffer'} if length $self->{'buffer'};
+    return;
+}
+
+sub _state {
+    my $self = shift;
+    my $state = $self->{'state'} ||= [];
+    $self->_push_state($self->_default_state) if ! @$state;
+    return $state;
+}
+
+sub _default_state { ['_menu_groups'] }
+
+sub _push_state {
+    my ($self, $meth, @args) = @_;
+    push @{ $self->{'state'} }, [$meth, @args];
 }
 
 sub _close_file {
     my ($self, $file) = @_;
     $self->unload_keepass($file);
     $self->_init_state;
-    return [];
 }
 
 sub _clear {
@@ -559,7 +586,7 @@ sub _menu_groups {
         $t .= "  File: $file\n";
         foreach my $g ($kdb->find_groups) {
             my $indent = '    ' x $g->{'level'};
-            my $key = _a2z($i++);
+            my $key = ++$i;
             $cb->{$key} = ['_menu_entries', $file, $g->{'id'}];
             $t .= "    ($key)    $indent$g->{'title'}\n";
         }
@@ -570,9 +597,16 @@ sub _menu_groups {
     $t .= "    (-)    Close a keepass database\n" if @{ $self->keepass };
     $cb->{'+'} = ['_action_open'];
     $cb->{'-'} = ['_action_close'];
+    if ($self->{'has_server'}) {
+        $t .= "    (!)    Server running at $self->{'has_server'} (close)\n";
+        $cb->{'!'} = ['_action_server_close'];
+    } else {
+        $t .= "    (~)    Open a web server\n";
+        $cb->{'~'} = ['_action_server_open'];
+    }
 
     $t .= "\n".delete($self->{'bound_msg'}) if $self->{'bound_msg'};
-    return [$t, $cb];
+    return $t, $cb;
 }
 
 sub _action_open {
@@ -580,17 +614,14 @@ sub _action_open {
     print "\n";
     my $file = $self->prompt_for_file({no_save => 1});
     if (!$file) {
-        print "No file specified.\n";
-        return [];
+        $self->{'buffer'} = "\nNo file specified.\n";
     } elsif (!-e $file) {
-        print "File \"$file\" does not exist.\n";
-        return [];
+        $self->{'buffer'} = "\nFile \"$file\" does not exist.\n";
     } else {
         my $k = $self->_prompt_for_pass_and_key($file);
-        print "Failed to open file $file\n";
-        $self->_init_state if $k;
+        $self->{'buffer'} = "\nFailed to open file $file\n" if ! $k;
     }
-    return [];
+    $self->_init_state;
 }
 
 sub _action_close {
@@ -600,16 +631,16 @@ sub _action_close {
     my $cb = {};
     my $t = '';
     for my $file (map {$_->[0]} @{ $self->keepass }) {
-        my $key = _a2z($i++);
+        my $key = ++$i;
         $cb->{$key} = ['_close_file', $file];
         $t .= "    ($key)    $file\n";
     }
-    print $t;
-    return [$t, $cb];
+    $self->_push_state($t, $cb);
+    $self->_render_state;
 }
 
 sub _menu_entries {
-    my ($self, $file, $gid) = @_;
+    my ($self, $file, $gid, $buf) = @_;
     my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
     my $g = $kdb->find_group({id => $gid}) || do { print "\nNo such matching gid ($gid) in file ($file)\n\n"; return };
     local $g->{'groups'}; # don't recurse while looking for entries since we are already flat
@@ -618,19 +649,22 @@ sub _menu_entries {
         print "\nNo group entries in $g->{'title'}\n\n";
         return;
     }
-    my $t = $self->_clear."\n  File: $file\n";
-    $t .= "    Group: $g->{'title'}\n";
+
+    my $cb  = {};
+    my $tab = {};
 
     my $i = 0;
-    my $cb = {};
     my @e;
     my $max = 0;
     for my $e (@E) {
-        my $key = _a2z($i++);
+        my $key = ++$i;
         $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, $gid];
         push @e, "      ($key)   $e->{'title'}";
         $max = length($e[-1]) if length($e[-1]) > $max;
+        $tab->{$e->{'title'}} ||= $key;
     }
+
+    $cb->{'+'} = ['_action_edit'];
 
     my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
     my $cols = int($W / ($max || 1));
@@ -638,12 +672,15 @@ sub _menu_entries {
     $rows = 8 if $rows < 8;
     my @row;
     $row[$_%$rows]->[$_/$rows] = $e[$_] for 0 .. @e;
+
+    my $t = $self->_clear."\n  File: $file\n";
+    $t .= "    Group: $g->{'title'}\n";
     $t .= sprintf("%-${max}s"x@$_, @$_)."\n" for @row;
     $t .= "\n";
-    $t .= "    (+)    Add a new entry\n";
-    $cb->{'+'} = ['_action_edit'];
-    print $t;
-    return [$t, $cb];
+    $t .= "    (ESC)  Go back\n";
+    $t .= "    (+)    Add a new entry (via server)\n";
+
+    return $t, $cb;
 }
 
 sub _menu_entry {
@@ -653,7 +690,7 @@ sub _menu_entry {
     my $g = $kdb->find_group({id => $gid}) || do { print "\nNo such matching gid ($gid) in file ($file)\n\n"; return };
 
     my $cb = {};
-    my $t = "\n  File: $file\n";
+    my $t = $self->_clear."\n  File: $file\n";
     $t .= "    Group: $g->{'title'}\n";
     $t .= "      Entry: $e->{'title'}\n";
 
@@ -674,13 +711,14 @@ sub _menu_entry {
     $t .= "        (u)    Print username\n";
     $t .= "        (p)    Print password\n";
     $t .= "        (a)    Run Auto-Type in 5 seconds\n";
+    $t .= "        (e)    Edit entry\n";
+    $t .= "        (d)    Delete entry\n";
     $t .= "        (1)    Copy password to clipboard\n";
     $t .= "        (2)    Copy username to clipboard\n";
     $t .= "        (3)    Copy url to clipboard\n";
     $t .= "        (4)    Copy title to clipboard\n";
     $t .= "        (5)    Copy comment to clipboard\n";
-    $t .= "        (e)    Edit entry\n";
-    $t .= "        (d)    Delete entry\n";
+    $t .= "        (ESC)  Go back\n";
     my $i = 6;
     for my $key (sort keys %{ $e->{'strings'} || {} }) {
         my $k = $i++;
@@ -694,11 +732,14 @@ sub _menu_entry {
     }
 
     if (!$action) {
-        print $self->_clear.$t;
-        return [$t, $cb];
+        return $t, $cb;
     }
 
+    # we run each action as part of the menu_entry - therefore, we need to not keep accumulating state for that entry
+    pop @{ $self->_state };
+
     if ($action eq 'info') {
+        $t .= "Info:\n";
         foreach my $k (sort keys %$e) {
             next if $k eq 'comment';
             my $val = $e->{$k};
@@ -711,35 +752,37 @@ sub _menu_entry {
                 $val = join '', map {"\n        \"$_\"  (".length($val->{$_})." bytes)"} sort keys %$val if $k eq 'binary';
                 $val = join '', map {"\n        \"$_\"  =  \"$val->{$_}\""} sort keys %$val if $k eq 'strings' || $k eq 'protected';
             }
-            print "      $k: ".(defined($val) ? $val : "(null)")."\n";
+            $t .= "      $k: ".(defined($val) ? $val : "(null)")."\n";
         }
     } elsif ($action eq 'comment') {
-        print "-------------------\n";
+        $t .= "Comment:\n";
         if (! defined $e->{'comment'}) {
-            print "--No comment--\n";
+            $t .= "--No comment--\n";
         } elsif (! length $e->{'comment'}) {
-            print "--Empty comment--\n";
+            $t .= "--Empty comment--\n";
         } else {
-            print $e->{'comment'};
-            print "\n--No newline--\n" if $e->{'comment'} !~ /\n$/;
+            $t .= $e->{'comment'};
+            $t .= "\n--No newline--\n" if $e->{'comment'} !~ /\n$/;
         }
     } elsif ($action eq 'print_user') {
+        $t .= "Username:\n";
         my $user = $e->{'username'};
         if (!defined $user) {
-            print "--No username defined--\n";
+            $t .= "--No username defined--\n";
         } elsif (!length $user) {
-            print "--Zero length username--\n";
+            $t .= "--Zero length username--\n";
         } else {
-            print "$user\n";
+            $t .= "$user\n";
         }
     } elsif ($action eq 'print_pass') {
+        $t .= "Password:\n";
         my $pass = $kdb->locked_entry_password($e);
         if (!defined $pass) {
-            print "--No password defined--\n";
+            $t .= "--No password defined--\n";
         } elsif (!length $pass) {
-            print "--Zero length password--\n";
+            $t .= "--Zero length password--\n";
         } else {
-            print "$pass\n";
+            $t .= "$pass\n";
         }
     } elsif ($action eq 'auto_type') {
         my $at = $e->{'auto_type'} || [];
@@ -759,7 +802,7 @@ sub _menu_entry {
             my @fh = $sel->can_read(1);
             if (@fh) {
                 read $fh[0], my $txt, 1;
-                print $self->_clear.$t."\n\nAuto-type cancelled\n";
+                print $t."\n\nAuto-type cancelled\n";
                 return [];
             }
         }
@@ -767,23 +810,23 @@ sub _menu_entry {
         my $title = eval { $self->wm_name($wid) };
 
         print "\rSending Auto-Type to window: $title            \n";
-
         $self->do_auto_type({
             auto_type => $keys,
             file => $file,
             entry => $e,
         }, $title, undef);
+        $t .= "\nSent Auto-Type to window: $title\n";
     } elsif ($action eq 'copy') {
         my $data = ($extra eq 'password') ? $kdb->locked_entry_password($e) : exists($e->{$extra}) ? $e->{$extra} : $e->{'strings'}->{$extra};
         $data = '' if ! defined $data;
         $self->_copy_to_clipboard($data) || return;
-        print "Sent $extra to clipboard\n";
-        print "--Zero length $extra--\n" if ! length $data;
+        $t .= "Sent $extra to clipboard\n";
+        $t .= "--Zero length $extra--\n" if ! length $data;
     } elsif ($action eq 'delete') {
         if ($self->prompt_yes_no("Would you like to delete this entry? ", "n")) {
-            print "Should delete\n";
+            $t .= "Should delete\n";
         } else {
-            print "Not deleting\n";
+            $t .= "Not deleting\n";
         }
     } elsif ($action eq 'save') {
         if (my $file = $self->_file_prompt("Save file \"$extra\" as: ", $extra)) {
@@ -796,12 +839,12 @@ sub _menu_entry {
                 print "Could not open $file for writing: $!\n";
             }
         } else {
-            print "File not saved\n";
+            $t .= "File not saved\n";
         }
     } else {
-        print "--Unknown action $action--\n";
+        $t .= "--Unknown action $action--\n";
     }
-    return [];
+    return $t, $cb;
 }
 
 sub _copy_to_clipboard {
@@ -821,7 +864,6 @@ sub _copy_to_clipboard {
         close $prog;
     } else {
         print "--No current clipboard service available (install one of Net::DBus or xclip\n";
-        return;
     }
 }
 
