@@ -13,6 +13,10 @@ use X11::Protocol;
 use vars qw(%keysyms);
 use X11::Keysyms qw(%keysyms); # part of X11::Protocol
 use Term::ReadKey qw(ReadMode GetControlChars);
+
+my $GREEN = "\e[1m\e[32m";
+my $BLUE  = "\e[1m\e[34m";
+my $CLEAR = "\e(B\e[m";
 my $use_guitest;
 BEGIN {
     $use_guitest = 1 if ($ENV{'KDE_SESSION_VERSION'} || 0) eq '5';
@@ -492,36 +496,58 @@ sub _handle_term_input {
     my ($self, $fh) = @_;
 
     $cntl ||= {GetControlChars $fh};
-    $self->{'buffer'} = '' if ! defined $self->{'buffer'};
     my $buf = delete $self->{'buffer'};
+    $buf = '' if ! defined $buf;
+    my $had_bs;
     while (1) {
         my @fh = IO::Select->new($fh)->can_read(0);
         last if ! @fh;
         my $chr = getc $fh;
         exit if $chr eq $cntl->{'INTERRUPT'} || $chr eq $cntl->{'EOF'};
+        if ($chr eq $cntl->{'ERASE'}) {
+            $buf =~ s/.$//s;
+            $had_bs = 1;
+            last;
+        }
         $buf .= $chr;
         last if $chr eq "\n";
     }
     my $had_nl = chomp $buf;
-    print "\r$buf" if length $buf > 1;
+
+    # ESC or ENTER
+    if (!$had_bs && (! length($buf) || $buf eq "\e")) {
+        pop @{ $self->_state };
+        $self->_render_state;
+        return 1;
+    }
 
     my $cur = $self->_state->[-1];
     my ($text,  $cb) = @$cur;
-    my $matches = grep {$_ =~ /^\Q$buf\E/} keys %$cb;
-    if (!$had_nl && $matches > 1) {
+
+    # tab complete
+    if ($buf =~ s/\t$//) {
+        my @pos = grep {$_ =~ /^\Q$buf\E/i} sort {length $a <=> length $b} keys %$cb;
+        while (lc($pos[0]) ne lc($buf)) {
+            my %h; $h{lc $_}++ for grep {$_} map {/^\Q$buf\E(.)/i; $1} @pos;
+            last if 1 != keys %h || (values %h)[0] != @pos;
+            $buf = substr($pos[0], 0, length($buf)+1);
+        }
         $self->{'buffer'} = $buf;
-        print "\r$buf" if length($buf) eq 1;# \r";
-    } elsif (! length($buf) || $buf eq "\e") {
-        pop @{ $self->_state };
         $self->_render_state;
-    } elsif (my $new_state = $cb->{$buf}) {
-        print "\n" if !$had_nl;
-        $self->_push_state($new_state);
-        $self->_render_state;
-    } else {
-        print "\n" if !$had_nl;
-        print "Unknown option ($buf)\n";
+        return 1;
     }
+
+    my @matches = grep {$_ =~ /^\Q$buf\E/i} keys %$cb;
+    my $err;
+    if ($had_nl || (@matches == 1 && $cb->{$buf})) {
+        if (my $new_state = $cb->{$buf}) {
+            $self->_push_state($new_state);
+            $buf = '';
+        }
+    }
+    $self->{'buffer'} = $buf;
+    $self->_render_state;
+    print $err if $err;
 
     return 1;
 }
@@ -544,7 +570,7 @@ sub _render_state {
     }
     my ($meth, @args) = @$text;
     my ($new_text, $new_cb) = $self->$meth(@args);
-    $cur->[1] = $new_cb if ref $new_cb;
+    $cur->[1] = $new_cb  if ref $new_cb;
     print $new_text if defined $new_text;
     print $self->{'buffer'} if length $self->{'buffer'};
     return;
@@ -640,7 +666,7 @@ sub _action_close {
 }
 
 sub _menu_entries {
-    my ($self, $file, $gid, $buf) = @_;
+    my ($self, $file, $gid) = @_;
     my ($kdb) = map {$_->[1]} grep {$_->[0] eq $file} @{ $self->keepass };
     my $g = $kdb->find_group({id => $gid}) || do { print "\nNo such matching gid ($gid) in file ($file)\n\n"; return };
     local $g->{'groups'}; # don't recurse while looking for entries since we are already flat
@@ -650,24 +676,24 @@ sub _menu_entries {
         return;
     }
 
-    my $cb  = {};
-    my $tab = {};
+    my $buf = $self->{'buffer'} || '';
 
-    my $i = 0;
-    my @e;
+    my $cb  = {};
+    my $i   = 0;
     my $max = 0;
+    length($_->{'title'}) > $max and $max = length($_->{'title'}) for @E;
+    my @e;
+    my $fmt = "      %-6s%-${max}s";
+    my $maxt = 6 + 6 + $max;
     for my $e (@E) {
         my $key = ++$i;
-        $cb->{$key} = ['_menu_entry', $file, $e->{'id'}, $gid];
-        push @e, "      ($key)   $e->{'title'}";
-        $max = length($e[-1]) if length($e[-1]) > $max;
-        $tab->{$e->{'title'}} ||= $key;
+        $cb->{$key} = $cb->{$e->{'title'}} = ['_menu_entry', $file, $e->{'id'}, $gid];
+        push @e, sprintf $fmt, "($key)", $e->{'title'};
+        $e[-1] = "$GREEN$e[-1]$CLEAR" if length $buf && ($key =~ /^\Q$buf\E/ || $e->{'title'} =~ /^\Q$buf\E/i);
     }
 
-    $cb->{'+'} = ['_action_edit'];
-
     my ($W, $H) = eval { Term::ReadKey::GetTerminalSize(\*STDOUT) };
-    my $cols = int($W / ($max || 1));
+    my $cols = int($W / ($maxt || 1));
     my $rows = @e / $cols; $rows = int(1 + $rows) if int($rows) != $rows;
     $rows = 8 if $rows < 8;
     my @row;
@@ -675,10 +701,11 @@ sub _menu_entries {
 
     my $t = $self->_clear."\n  File: $file\n";
     $t .= "    Group: $g->{'title'}\n";
-    $t .= sprintf("%-${max}s"x@$_, @$_)."\n" for @row;
+    $t .= join('', @$_)."\n" for @row;
     $t .= "\n";
-    $t .= "    (ESC)  Go back\n";
     $t .= "    (+)    Add a new entry (via server)\n";
+    $t .= "    (ESC)  Go back\n";
+    $cb->{'+'} = ['_action_edit', $file, $gid];
 
     return $t, $cb;
 }
